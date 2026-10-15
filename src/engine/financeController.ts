@@ -17,6 +17,20 @@ export class FinanceController {
       }
     }
 
+    if (mcpClient.isDirectMode()) {
+      const liveSync = await mcpClient.getSyncData();
+      if (!liveSync) {
+        throw new Error('Failed to retrieve live Zenmoney sync data.');
+      }
+      return FinancialDataNormalizer.normalize({
+        accounts: liveSync.accounts,
+        transactions: liveSync.transactions,
+        budgets: liveSync.budgets,
+        periodDays,
+        sourceMode: 'live',
+      });
+    }
+
     const liveData = await this.fetchRemoteMcpData();
     return FinancialDataNormalizer.normalize({
       accounts: liveData.accounts,

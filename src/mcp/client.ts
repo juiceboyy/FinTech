@@ -1,13 +1,15 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { authManager } from './oauth.js';
-import type { McpClientStatus } from './types.js';
+import { v8SyncService } from './v8Api.js';
+import type { McpClientStatus, ZenmoneySyncData } from './types.js';
 
 export class ZenmoneyMcpClient {
   private client: Client | null = null;
   private transport: SSEClientTransport | null = null;
   private endpoint: string;
   private isConnected = false;
+  private isV8Direct = false;
   private lastSyncAt: string | null = null;
   private lastError?: string;
 
@@ -18,26 +20,27 @@ export class ZenmoneyMcpClient {
   public async connect(): Promise<boolean> {
     const token = authManager.getAccessToken();
     if (!token) {
-      this.lastError = 'No access token found in environment or session file.';
+      this.lastError = 'No access token found in environment or session.';
       this.isConnected = false;
       return false;
     }
 
+    // Step 1: Probe Zenmoney API v8 directly (validates zerro.app/token tokens)
+    const v8Valid = await v8SyncService.probeToken(token);
+    if (v8Valid) {
+      this.isConnected = true;
+      this.isV8Direct = true;
+      this.lastError = undefined;
+      this.lastSyncAt = new Date().toISOString();
+      return true;
+    }
+
+    // Step 2: Fall back to remote MCP SSE transport (for OAuth-minted tokens)
     try {
       this.client = new Client(
-        {
-          name: 'zenmoney-fintech-client',
-          version: '1.0.0',
-        },
-        {
-          capabilities: {},
-        }
+        { name: 'zenmoney-fintech-client', version: '1.0.0' },
+        { capabilities: {} }
       );
-
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${token}`,
-        Accept: 'text/event-stream',
-      };
 
       this.transport = new SSEClientTransport(new URL(this.endpoint), {
         requestInit: {
@@ -45,48 +48,51 @@ export class ZenmoneyMcpClient {
             Authorization: `Bearer ${token}`,
           },
         },
-        eventSourceInit: {
-          fetch: (url, init) => {
-            return fetch(url, {
-              ...init,
-              headers: {
-                ...(init?.headers || {}),
-                ...headers,
-              },
-            });
-          },
-        },
       });
 
       await this.client.connect(this.transport);
       this.isConnected = true;
+      this.isV8Direct = false;
       this.lastError = undefined;
+      this.lastSyncAt = new Date().toISOString();
       return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.lastError = msg;
+      this.lastError = `Zenmoney authentication failed: ${msg}. Please ensure your token from zerro.app/token is valid and active.`;
       this.isConnected = false;
-      console.warn(`Zenmoney MCP connection warning: ${msg}`);
       return false;
     }
   }
 
+  public async getSyncData(): Promise<ZenmoneySyncData | null> {
+    const token = authManager.getAccessToken();
+    if (this.isV8Direct && token) {
+      const data = await v8SyncService.fetchSyncData(token);
+      this.lastSyncAt = new Date().toISOString();
+      return data;
+    }
+    return null;
+  }
+
+  public isDirectMode(): boolean {
+    return this.isV8Direct;
+  }
+
   public async listTools(): Promise<Array<{ name: string; description?: string }>> {
-    if (!this.client || !this.isConnected) {
+    if (!this.client || !this.isConnected || this.isV8Direct) {
       return [];
     }
     try {
       const result = await this.client.listTools();
       return result.tools || [];
-    } catch (err) {
-      console.error('Error listing remote MCP tools:', err);
+    } catch {
       return [];
     }
   }
 
   public async callTool(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.client || !this.isConnected) {
-      throw new Error('MCP client is not connected to remote Zenmoney endpoint');
+      throw new Error('MCP client is not connected');
     }
     const response = await this.client.callTool({
       name,
@@ -100,7 +106,7 @@ export class ZenmoneyMcpClient {
     const token = authManager.getAccessToken();
     return {
       connected: this.isConnected,
-      endpoint: this.endpoint,
+      endpoint: this.isV8Direct ? 'https://api.zenmoney.app/v8/diff/ (Zenmoney Live)' : this.endpoint,
       mode: this.isConnected ? 'live' : 'disconnected',
       authenticated: Boolean(token),
       lastSyncAt: this.lastSyncAt,
@@ -113,12 +119,13 @@ export class ZenmoneyMcpClient {
       try {
         await this.transport.close();
       } catch {
-        // ignore close error
+        // ignore
       }
     }
     this.client = null;
     this.transport = null;
     this.isConnected = false;
+    this.isV8Direct = false;
   }
 }
 
