@@ -7,10 +7,10 @@ export class FinancialDataNormalizer {
     transactions: ZenmoneyTransaction[];
     budgets: ZenmoneyBudget[];
     periodDays?: number;
-    sourceMode?: 'live' | 'mock';
+    sourceMode?: 'live';
   }): NormalizedFinancialSummary {
     const periodDays = params.periodDays || 15;
-    const sourceMode = params.sourceMode || 'mock';
+    const sourceMode = 'live';
 
     const now = new Date();
     const startDateObj = new Date(now);

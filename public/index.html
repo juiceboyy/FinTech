@@ -25,6 +25,21 @@
       </div>
     </header>
 
+    <!-- Zenmoney MCP Connection Banner (Visible when disconnected) -->
+    <section id="auth-banner" class="panel auth-banner" style="display: none;">
+      <div class="auth-banner-content">
+        <div class="auth-info">
+          <h3>Connect Zenmoney Live Endpoint</h3>
+          <p class="auth-subtext">Enter your personal token from <a href="https://zerro.app/token" target="_blank" rel="noopener">zerro.app/token</a> to synchronize your live accounts and transactions.</p>
+        </div>
+        <div class="auth-input-group">
+          <input type="password" id="token-input" placeholder="Paste ZENMONEY_TOKEN..." class="form-input">
+          <button id="save-token-btn" class="btn btn-primary">Connect Live</button>
+        </div>
+      </div>
+      <div id="auth-error" class="auth-error-msg" style="display: none;"></div>
+    </section>
+
     <!-- Top KPI Grid -->
     <section class="kpi-grid">
       <div class="kpi-card">
@@ -58,7 +73,7 @@
             <h2>AI Health Check Report</h2>
             <span class="panel-meta" id="report-timestamp">Awaiting generation</span>
           </div>
-          <span class="panel-tag" id="report-source-tag">Source: Mock</span>
+          <span class="panel-tag" id="report-source-tag">Zenmoney Live</span>
         </div>
         <div class="report-content" id="report-container">
           <p class="empty-state">Loading financial report...</p>

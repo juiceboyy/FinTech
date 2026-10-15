@@ -31,5 +31,5 @@ export interface NormalizedFinancialSummary {
   transactionsCount: number;
   recentTransactions: ZenmoneyTransaction[];
   budgets: ZenmoneyBudget[];
-  sourceMode: 'live' | 'mock';
+  sourceMode: 'live';
 }

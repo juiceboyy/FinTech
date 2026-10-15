@@ -13,7 +13,7 @@ export interface StoredReport {
   netCashFlow: number;
   savingsRatePercentage: number;
   markdownContent: string;
-  sourceMode: 'live' | 'mock';
+  sourceMode: 'live';
   generatedBy: string;
 }
 

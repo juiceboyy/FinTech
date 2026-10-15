@@ -1,36 +1,29 @@
 import { mcpClient } from '../mcp/client.js';
-import { generateMockFinancialData } from './mockData.js';
 import { FinancialDataNormalizer } from './dataNormalizer.js';
 import type { NormalizedFinancialSummary } from './types.js';
 import type { ZenmoneyAccount, ZenmoneyTransaction, ZenmoneyBudget } from '../mcp/types.js';
 
 export class FinanceController {
   public async getFinancialSummary(periodDays = 15): Promise<NormalizedFinancialSummary> {
-    const status = mcpClient.getStatus();
+    let status = mcpClient.getStatus();
 
-    if (status.connected) {
-      try {
-        const liveData = await this.fetchRemoteMcpData();
-        return FinancialDataNormalizer.normalize({
-          accounts: liveData.accounts,
-          transactions: liveData.transactions,
-          budgets: liveData.budgets,
-          periodDays,
-          sourceMode: 'live',
-        });
-      } catch (err) {
-        console.warn('Failed to fetch from live Zenmoney MCP endpoint, falling back to mock dataset:', err);
+    if (!status.connected) {
+      const connected = await mcpClient.connect();
+      status = mcpClient.getStatus();
+      if (!connected) {
+        throw new Error(
+          status.error || 'Zenmoney MCP is disconnected. Please configure ZENMONEY_TOKEN in your environment or authorize your Zenmoney account.'
+        );
       }
     }
 
-    // Fallback: Realistic Mock Dataset
-    const mock = generateMockFinancialData();
+    const liveData = await this.fetchRemoteMcpData();
     return FinancialDataNormalizer.normalize({
-      accounts: mock.accounts,
-      transactions: mock.transactions,
-      budgets: mock.budgets,
+      accounts: liveData.accounts,
+      transactions: liveData.transactions,
+      budgets: liveData.budgets,
       periodDays,
-      sourceMode: 'mock',
+      sourceMode: 'live',
     });
   }
 

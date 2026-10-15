@@ -40,7 +40,7 @@ export interface ZenmoneySyncData {
 export interface McpClientStatus {
   connected: boolean;
   endpoint: string;
-  mode: 'live' | 'mock';
+  mode: 'live' | 'disconnected';
   authenticated: boolean;
   lastSyncAt: string | null;
   error?: string;

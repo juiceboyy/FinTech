@@ -21,12 +21,15 @@ async function fetchStatus() {
     const data = await res.json();
     
     const mcpPill = document.getElementById('mcp-pill');
+    const authBanner = document.getElementById('auth-banner');
     if (data.mcp.connected) {
       mcpPill.textContent = 'MCP: Live';
       mcpPill.className = 'status-pill status-live';
+      if (authBanner) authBanner.style.display = 'none';
     } else {
-      mcpPill.textContent = 'MCP: Mock Mode';
+      mcpPill.textContent = 'MCP: Disconnected';
       mcpPill.className = 'status-pill status-mock';
+      if (authBanner) authBanner.style.display = 'block';
     }
 
     const geminiPill = document.getElementById('gemini-pill');
@@ -48,6 +51,13 @@ async function fetchStatus() {
 async function fetchFinancialSummary() {
   try {
     const res = await fetch('/api/financial-summary?days=15');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      document.getElementById('kpi-cashflow').textContent = 'EUR --.--';
+      document.getElementById('kpi-cashflow-sub').textContent = errData.error || 'Zenmoney connection required';
+      document.getElementById('transactions-body').innerHTML = `<tr><td colspan="5" class="text-center">${errData.error || 'Please connect Zenmoney token to view ledger.'}</td></tr>`;
+      return;
+    }
     const data = await res.json();
 
     // Render KPIs
@@ -186,6 +196,52 @@ async function triggerHealthCheck() {
   }
 }
 
+async function connectToken() {
+  const input = document.getElementById('token-input');
+  const errBox = document.getElementById('auth-error');
+  const btn = document.getElementById('save-token-btn');
+  const token = input ? input.value.trim() : '';
+
+  if (!token) {
+    if (errBox) {
+      errBox.textContent = 'Please enter a valid Zenmoney token.';
+      errBox.style.display = 'block';
+    }
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+  if (errBox) errBox.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/set-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    if (data.connected) {
+      input.value = '';
+      await fetchStatus();
+      await fetchFinancialSummary();
+    } else {
+      if (errBox) {
+        errBox.textContent = data.status?.error || 'Could not authenticate token with Zenmoney MCP.';
+        errBox.style.display = 'block';
+      }
+    }
+  } catch (err) {
+    if (errBox) {
+      errBox.textContent = 'Connection error: ' + (err.message || String(err));
+      errBox.style.display = 'block';
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect Live';
+  }
+}
+
 function init() {
   fetchStatus();
   fetchFinancialSummary();
@@ -196,6 +252,11 @@ function init() {
   if (auditBtn) {
     auditBtn.addEventListener('click', triggerHealthCheck);
   }
+
+  const saveTokenBtn = document.getElementById('save-token-btn');
+  if (saveTokenBtn) {
+    saveTokenBtn.addEventListener('click', connectToken);
+  }
 }
 
 // Global DOMContentLoaded Guard
@@ -204,3 +265,4 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+

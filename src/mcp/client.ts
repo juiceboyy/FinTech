@@ -101,7 +101,7 @@ export class ZenmoneyMcpClient {
     return {
       connected: this.isConnected,
       endpoint: this.endpoint,
-      mode: this.isConnected ? 'live' : 'mock',
+      mode: this.isConnected ? 'live' : 'disconnected',
       authenticated: Boolean(token),
       lastSyncAt: this.lastSyncAt,
       error: this.lastError,

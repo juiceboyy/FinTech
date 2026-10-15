@@ -27,15 +27,24 @@ test('FinancialDataNormalizer calculates accurate net cash flow and savings rate
   assert.ok(summary.topAnomalies.length > 0, 'Anomalies should be detected for large expenditures');
 });
 
-test('FinanceController delivers normalized 15-day financial summary in mock mode', async () => {
-  const summary = await financeController.getFinancialSummary(15);
-  assert.strictEqual(summary.periodDays, 15);
-  assert.ok(summary.accounts.length >= 3, 'Should contain accounts');
-  assert.strictEqual(summary.sourceMode, 'mock');
+test('FinanceController enforces live Zenmoney connection requirement', async () => {
+  await assert.rejects(
+    async () => {
+      await financeController.getFinancialSummary(15);
+    },
+    /Zenmoney MCP is disconnected|No access token found/,
+    'Should reject when MCP is disconnected and no token is present'
+  );
 });
 
 test('HealthCheckAnalyzer generates structured report and persists it to storage', async () => {
-  const summary = await financeController.getFinancialSummary(15);
+  const mock = generateMockFinancialData();
+  const summary = FinancialDataNormalizer.normalize({
+    accounts: mock.accounts,
+    transactions: mock.transactions,
+    budgets: mock.budgets,
+    periodDays: 15,
+  });
   const report = await healthCheckAnalyzer.analyzeAndSave(summary);
 
   assert.ok(report.id.startsWith('report-'), 'Report ID must have report- prefix');

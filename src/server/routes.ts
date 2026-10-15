@@ -90,3 +90,20 @@ apiRouter.get('/auth/callback', async (req: Request, res: Response) => {
     res.status(500).send(`OAuth token exchange error: ${msg}`);
   }
 });
+
+// Direct Token Configuration Endpoint
+apiRouter.post('/set-token', async (req: Request, res: Response) => {
+  const token = req.body?.token as string;
+  if (!token || typeof token !== 'string' || token.trim().length === 0) {
+    res.status(400).json({ error: 'Token string is required' });
+    return;
+  }
+  authManager.saveTokens({ accessToken: token.trim() });
+  const connected = await mcpClient.connect();
+  res.json({
+    success: true,
+    connected,
+    status: mcpClient.getStatus(),
+  });
+});
+
