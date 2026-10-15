@@ -17,12 +17,20 @@ export interface StoredReport {
   generatedBy: string;
 }
 
-const REPORTS_DIR = path.resolve(process.cwd(), 'data/reports');
+const isServerless = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const REPORTS_DIR = isServerless ? path.join('/tmp', 'reports') : path.resolve(process.cwd(), 'data/reports');
 
 export class ReportStorage {
+  private inMemoryCache: Map<string, StoredReport> = new Map();
+  private latestInMemory: StoredReport | null = null;
+
   constructor() {
-    if (!fs.existsSync(REPORTS_DIR)) {
-      fs.mkdirSync(REPORTS_DIR, { recursive: true });
+    try {
+      if (!fs.existsSync(REPORTS_DIR)) {
+        fs.mkdirSync(REPORTS_DIR, { recursive: true });
+      }
+    } catch {
+      // Ignore directory creation failure in locked serverless environments
     }
   }
 
@@ -47,16 +55,26 @@ export class ReportStorage {
       generatedBy: params.generatedBy,
     };
 
-    const filePath = path.join(REPORTS_DIR, `${id}.json`);
-    const latestPath = path.join(REPORTS_DIR, 'latest.json');
+    // Cache in memory
+    this.inMemoryCache.set(id, report);
+    this.latestInMemory = report;
 
-    fs.writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf-8');
-    fs.writeFileSync(latestPath, JSON.stringify(report, null, 2), 'utf-8');
+    try {
+      const filePath = path.join(REPORTS_DIR, `${id}.json`);
+      const latestPath = path.join(REPORTS_DIR, 'latest.json');
+      fs.writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf-8');
+      fs.writeFileSync(latestPath, JSON.stringify(report, null, 2), 'utf-8');
+    } catch {
+      // In-memory cache ensures accessibility even if disk is read-only
+    }
 
     return report;
   }
 
   public getLatestReport(): StoredReport | null {
+    if (this.latestInMemory) {
+      return this.latestInMemory;
+    }
     const latestPath = path.join(REPORTS_DIR, 'latest.json');
     if (!fs.existsSync(latestPath)) {
       return null;
@@ -70,29 +88,46 @@ export class ReportStorage {
   }
 
   public listReports(): Array<Omit<StoredReport, 'markdownContent'>> {
-    if (!fs.existsSync(REPORTS_DIR)) {
-      return [];
-    }
-    const files = fs.readdirSync(REPORTS_DIR)
-      .filter((f) => f.startsWith('report-') && f.endsWith('.json'))
-      .sort()
-      .reverse();
-
     const results: Array<Omit<StoredReport, 'markdownContent'>> = [];
-    for (const f of files.slice(0, 20)) {
+
+    // From memory cache
+    for (const report of Array.from(this.inMemoryCache.values()).reverse()) {
+      const { markdownContent, ...meta } = report;
+      results.push(meta);
+    }
+
+    // From disk if not already in results
+    if (fs.existsSync(REPORTS_DIR)) {
       try {
-        const raw = fs.readFileSync(path.join(REPORTS_DIR, f), 'utf-8');
-        const parsed: StoredReport = JSON.parse(raw);
-        const { markdownContent, ...meta } = parsed;
-        results.push(meta);
+        const files = fs.readdirSync(REPORTS_DIR)
+          .filter((f) => f.startsWith('report-') && f.endsWith('.json'))
+          .sort()
+          .reverse();
+
+        for (const f of files.slice(0, 20)) {
+          try {
+            const raw = fs.readFileSync(path.join(REPORTS_DIR, f), 'utf-8');
+            const parsed: StoredReport = JSON.parse(raw);
+            if (!results.some((r) => r.id === parsed.id)) {
+              const { markdownContent, ...meta } = parsed;
+              results.push(meta);
+            }
+          } catch {
+            // ignore broken file
+          }
+        }
       } catch {
-        // ignore broken files
+        // ignore disk listing failure
       }
     }
+
     return results;
   }
 
   public getReportById(id: string): StoredReport | null {
+    if (this.inMemoryCache.has(id)) {
+      return this.inMemoryCache.get(id) || null;
+    }
     const safeId = path.basename(id);
     const target = path.join(REPORTS_DIR, `${safeId}.json`);
     if (!fs.existsSync(target)) {

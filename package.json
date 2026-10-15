@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "test": "node --test dist/test/*.js || tsx test/smoke.test.ts"
+    "test": "tsx test/smoke.test.ts"
   },
   "keywords": [
     "zenmoney",
@@ -23,9 +23,11 @@
   "dependencies": {
     "@google/genai": "^2.29.1",
     "@modelcontextprotocol/sdk": "^1.6.1",
+    "@netlify/functions": "^6.0.2",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "serverless-http": "^4.0.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
