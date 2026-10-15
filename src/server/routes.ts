@@ -5,8 +5,12 @@ import { financeController } from '../engine/financeController.js';
 import { geminiService, GEMINI_MODEL } from '../ai/geminiClient.js';
 import { reportStorage } from '../ai/reportStorage.js';
 import { cronService } from '../scheduler/cronService.js';
+import { importRouter } from './importRoutes.js';
 
 export const apiRouter = Router();
+
+// ING Credit Card CSV Importer Routes
+apiRouter.use('/import', importRouter);
 
 // System Status
 apiRouter.get('/status', (_req: Request, res: Response) => {

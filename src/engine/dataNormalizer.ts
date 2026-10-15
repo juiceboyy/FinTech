@@ -1,3 +1,4 @@
+import { Decimal } from 'decimal.js';
 import type { ZenmoneyAccount, ZenmoneyTransaction, ZenmoneyBudget } from '../mcp/types.js';
 import type { NormalizedFinancialSummary, CategoryExpense, FinancialAnomaly } from './types.js';
 
@@ -23,74 +24,74 @@ export class FinancialDataNormalizer {
       return tx.date >= startDate && tx.date <= endDate;
     });
 
-    let totalIncome = 0;
-    let totalExpenses = 0;
-    const categoryTotals: Record<string, number> = {};
+    let totalIncomeDec = new Decimal(0);
+    let totalExpensesDec = new Decimal(0);
+    const categoryTotals: Record<string, Decimal> = {};
 
     for (const tx of filtered) {
-      const inc = Number(tx.income) || 0;
-      const out = Number(tx.outcome) || 0;
+      const inc = new Decimal(tx.income || 0);
+      const out = new Decimal(tx.outcome || 0);
 
-      totalIncome += inc;
-      totalExpenses += out;
+      totalIncomeDec = totalIncomeDec.plus(inc);
+      totalExpensesDec = totalExpensesDec.plus(out);
 
-      if (out > 0) {
+      if (out.greaterThan(0)) {
         const cat = tx.categoryTitle || tx.category || 'Uncategorized';
-        categoryTotals[cat] = (categoryTotals[cat] || 0) + out;
+        categoryTotals[cat] = (categoryTotals[cat] || new Decimal(0)).plus(out);
       }
     }
 
-    const netCashFlow = Number((totalIncome - totalExpenses).toFixed(2));
-    const savingsRate = totalIncome > 0
-      ? Number(((netCashFlow / totalIncome) * 100).toFixed(1))
-      : 0;
+    const netCashFlowDec = totalIncomeDec.minus(totalExpensesDec);
+    const savingsRateDec = totalIncomeDec.greaterThan(0)
+      ? netCashFlowDec.dividedBy(totalIncomeDec).times(100)
+      : new Decimal(0);
 
     // Category breakdown
     const categoryBreakdown: CategoryExpense[] = Object.entries(categoryTotals)
-      .map(([category, amount]) => {
-        const percentage = totalExpenses > 0
-          ? Number(((amount / totalExpenses) * 100).toFixed(1))
+      .map(([category, amountDec]) => {
+        const percentage = totalExpensesDec.greaterThan(0)
+          ? amountDec.dividedBy(totalExpensesDec).times(100).toDecimalPlaces(1).toNumber()
           : 0;
         const matchingBudget = params.budgets.find((b) => b.category === category || b.categoryTitle === category);
         return {
           category,
-          amount: Number(amount.toFixed(2)),
+          amount: amountDec.toDecimalPlaces(2).toNumber(),
           percentage,
           budgeted: matchingBudget?.budgetedOutcome,
         };
       })
-      .sort((a, b) => b.amount - a.amount);
+      .sort((a, b) => new Decimal(b.amount).minus(a.amount).toNumber());
 
-    // Identify anomalies (e.g. expenses >= 250 or exceeding budget significantly)
+    // Identify anomalies (expenses >= 250 EUR threshold)
     const topAnomalies: FinancialAnomaly[] = [];
     for (const tx of filtered) {
-      const out = Number(tx.outcome) || 0;
-      if (out >= 250) {
+      const out = new Decimal(tx.outcome || 0);
+      if (out.greaterThanOrEqualTo(250)) {
         topAnomalies.push({
           id: tx.id,
           date: tx.date,
           payee: tx.payee || 'Unknown Payee',
           category: tx.categoryTitle || tx.category || 'General',
-          amount: out,
+          amount: out.toDecimalPlaces(2).toNumber(),
           reason: `High expenditure single transaction exceeding 250 EUR threshold`,
         });
       }
     }
 
     // Liquid balance (checking + savings + cash)
-    const totalLiquidBalance = params.accounts
+    const totalLiquidDec = params.accounts
       .filter((acc) => ['checking', 'deposit', 'cash'].includes(acc.type))
-      .reduce((sum, acc) => sum + (Number(acc.balance) || 0), 0);
+      .reduce((sum, acc) => sum.plus(new Decimal(acc.balance || 0)), new Decimal(0));
 
     return {
       periodDays,
       startDate,
       endDate,
-      totalIncome: Number(totalIncome.toFixed(2)),
-      totalExpenses: Number(totalExpenses.toFixed(2)),
-      netCashFlow,
-      savingsRatePercentage: savingsRate,
-      totalLiquidBalance: Number(totalLiquidBalance.toFixed(2)),
+      totalIncome: totalIncomeDec.toDecimalPlaces(2).toNumber(),
+      totalExpenses: totalExpensesDec.toDecimalPlaces(2).toNumber(),
+      netCashFlow: netCashFlowDec.toDecimalPlaces(2).toNumber(),
+      savingsRatePercentage: savingsRateDec.toDecimalPlaces(1).toNumber(),
+      totalLiquidBalance: totalLiquidDec.toDecimalPlaces(2).toNumber(),
       accounts: params.accounts,
       categoryBreakdown,
       topAnomalies,
@@ -101,3 +102,4 @@ export class FinancialDataNormalizer {
     };
   }
 }
+

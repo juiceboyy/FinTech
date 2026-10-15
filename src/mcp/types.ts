@@ -1,10 +1,27 @@
 export interface ZenmoneyAccount {
   id: string;
   title: string;
-  type: 'cash' | 'ccard' | 'checking' | 'loan' | 'deposit' | 'investment';
+  type: 'cash' | 'ccard' | 'checking' | 'loan' | 'deposit' | 'investment' | 'debt';
   balance: number;
   currency: string;
+  instrumentId?: number;
   archive?: boolean;
+}
+
+export interface ZenmoneyCategory {
+  id: string;
+  title: string;
+  parent?: string | null;
+  showIncome?: boolean;
+  showOutcome?: boolean;
+}
+
+export interface ZenmoneyCategorySuggestion {
+  payee: string;
+  normalizedPayee?: string;
+  categoryId?: string;
+  categoryTitle?: string;
+  merchantId?: string;
 }
 
 export interface ZenmoneyTransaction {
@@ -34,6 +51,32 @@ export interface ZenmoneySyncData {
   accounts: ZenmoneyAccount[];
   transactions: ZenmoneyTransaction[];
   budgets: ZenmoneyBudget[];
+  categories?: ZenmoneyCategory[];
+  userId?: number;
+  defaultInstrumentId?: number;
+  serverTimestamp?: number;
+}
+
+export interface AddExpenseInput {
+  accountId: string;
+  amount: string; // Decimal string e.g. "12.34"
+  date: string;   // YYYY-MM-DD
+  categoryId?: string;
+  payee?: string;
+  comment?: string;
+}
+
+export interface AddIncomeInput {
+  accountId: string;
+  amount: string; // Decimal string e.g. "12.34"
+  date: string;   // YYYY-MM-DD
+  categoryId?: string;
+  payee?: string;
+  comment?: string;
+}
+
+export interface MutationResult {
+  id: string;
   serverTimestamp?: number;
 }
 
@@ -53,3 +96,4 @@ export interface OAuthTokens {
   tokenType?: string;
   savedAt: string;
 }
+

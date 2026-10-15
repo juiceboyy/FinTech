@@ -1,8 +1,19 @@
+import { randomUUID } from 'node:crypto';
+import { Decimal } from 'decimal.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { authManager } from './oauth.js';
 import { v8SyncService } from './v8Api.js';
-import type { McpClientStatus, ZenmoneySyncData } from './types.js';
+import { v8Mutations } from './v8Mutations.js';
+import type {
+  AddExpenseInput,
+  AddIncomeInput,
+  McpClientStatus,
+  MutationResult,
+  ZenmoneyCategory,
+  ZenmoneyCategorySuggestion,
+  ZenmoneySyncData,
+} from './types.js';
 
 export class ZenmoneyMcpClient {
   private client: Client | null = null;
@@ -74,6 +85,86 @@ export class ZenmoneyMcpClient {
     return null;
   }
 
+  public async suggestCategories(
+    payees: string[],
+    categories: ZenmoneyCategory[]
+  ): Promise<Map<string, ZenmoneyCategorySuggestion>> {
+    const token = authManager.getAccessToken();
+    if (this.isV8Direct && token) {
+      return v8Mutations.suggestCategories(token, payees, categories);
+    }
+
+    const map = new Map<string, ZenmoneyCategorySuggestion>();
+    if (!this.client || !this.isConnected) {
+      return map;
+    }
+
+    for (const payee of new Set(payees.map((p) => p.trim()).filter(Boolean))) {
+      try {
+        const res = (await this.callTool('suggest_category', { payee })) as {
+          content?: Array<{ text?: string }>;
+        };
+        const text = res?.content?.[0]?.text || '';
+        const idMatch = text.match(/`([0-9a-f-]{36})`/i);
+        const cat = idMatch ? categories.find((c) => c.id === idMatch[1]) : undefined;
+        map.set(payee, {
+          payee,
+          categoryId: cat?.id,
+          categoryTitle: cat?.title,
+        });
+      } catch {
+        // Ignore individual suggest failures
+      }
+    }
+    return map;
+  }
+
+  public async addExpense(
+    syncContext: ZenmoneySyncData,
+    input: AddExpenseInput
+  ): Promise<MutationResult> {
+    const token = authManager.getAccessToken();
+    if (this.isV8Direct && token) {
+      const result = await v8Mutations.addExpense(token, syncContext, input);
+      this.lastSyncAt = new Date().toISOString();
+      return result;
+    }
+
+    const amountNum = new Decimal(input.amount).toDecimalPlaces(2).toNumber();
+    await this.callTool('add_expense', {
+      account: input.accountId,
+      amount: amountNum,
+      date: input.date,
+      category: input.categoryId,
+      payee: input.payee,
+      comment: input.comment,
+    });
+    return { id: randomUUID() };
+  }
+
+  public async addIncome(
+    syncContext: ZenmoneySyncData,
+    input: AddIncomeInput
+  ): Promise<MutationResult> {
+    const token = authManager.getAccessToken();
+    if (this.isV8Direct && token) {
+      const result = await v8Mutations.addIncome(token, syncContext, input);
+      this.lastSyncAt = new Date().toISOString();
+      return result;
+    }
+
+    const amountNum = new Decimal(input.amount).toDecimalPlaces(2).toNumber();
+    await this.callTool('add_income', {
+      account: input.accountId,
+      amount: amountNum,
+      date: input.date,
+      category: input.categoryId,
+      payee: input.payee,
+      comment: input.comment,
+    });
+    return { id: randomUUID() };
+  }
+
   public isDirectMode(): boolean {
     return this.isV8Direct;
   }
@@ -130,3 +221,4 @@ export class ZenmoneyMcpClient {
 }
 
 export const mcpClient = new ZenmoneyMcpClient();
+

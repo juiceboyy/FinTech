@@ -196,3 +196,89 @@
   font-family: var(--font-mono);
 }
 
+/* ING Credit Card CSV Importer */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.file-upload-label {
+  display: inline-block;
+}
+
+.importer-controls-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--surface-alt);
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.importer-account-group,
+.importer-action-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.importer-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.importer-summary-metrics {
+  display: flex;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.form-select,
+.table-input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.table-input {
+  width: 100%;
+  min-width: 140px;
+}
+
+.importer-feedback {
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  margin-bottom: 16px;
+  background: var(--surface-alt);
+  border-left: 3px solid var(--border-light);
+}
+
+.importer-row-skipped {
+  opacity: 0.55;
+}
+
+.col-check {
+  width: 36px;
+}
+
+

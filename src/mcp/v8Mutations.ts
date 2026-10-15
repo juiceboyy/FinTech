@@ -1,0 +1,211 @@
+import { randomUUID } from 'node:crypto';
+import { Decimal } from 'decimal.js';
+import { z } from 'zod';
+import type {
+  AddExpenseInput,
+  AddIncomeInput,
+  MutationResult,
+  ZenmoneyCategory,
+  ZenmoneyCategorySuggestion,
+  ZenmoneySyncData,
+} from './types.js';
+
+const SuggestItemSchema = z.object({
+  payee: z.string().nullable().optional(),
+  merchant: z.string().nullable().optional(),
+  tag: z.union([z.array(z.string()), z.string()]).nullable().optional(),
+});
+
+const SuggestResponseSchema = z.array(SuggestItemSchema);
+
+const DiffResponseSchema = z.object({
+  serverTimestamp: z.number().optional(),
+});
+
+export class ZenmoneyV8MutationService {
+  private diffEndpoint = 'https://api.zenmoney.app/v8/diff/';
+  private suggestEndpoint = 'https://api.zenmoney.app/v8/suggest/';
+
+  public async suggestCategories(
+    token: string,
+    payees: string[],
+    categories: ZenmoneyCategory[]
+  ): Promise<Map<string, ZenmoneyCategorySuggestion>> {
+    const resultMap = new Map<string, ZenmoneyCategorySuggestion>();
+    const uniquePayees = Array.from(new Set(payees.map((p) => p.trim()).filter(Boolean)));
+    if (uniquePayees.length === 0) {
+      return resultMap;
+    }
+
+    const catById = new Map<string, ZenmoneyCategory>();
+    for (const c of categories) {
+      catById.set(c.id, c);
+    }
+
+    try {
+      const res = await fetch(this.suggestEndpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(uniquePayees.map((payee) => ({ payee }))),
+      });
+
+      if (!res.ok) {
+        return resultMap;
+      }
+
+      const rawJson = await res.json();
+      const parsed = SuggestResponseSchema.safeParse(rawJson);
+      if (!parsed.success) {
+        return resultMap;
+      }
+
+      parsed.data.forEach((item, idx) => {
+        const originalPayee = uniquePayees[idx];
+        if (!originalPayee) return;
+
+        let tagId: string | undefined;
+        if (Array.isArray(item.tag) && item.tag.length > 0) {
+          tagId = item.tag[0];
+        } else if (typeof item.tag === 'string' && item.tag.length > 0) {
+          tagId = item.tag;
+        }
+
+        const matchedCat = tagId ? catById.get(tagId) : undefined;
+        resultMap.set(originalPayee, {
+          payee: originalPayee,
+          normalizedPayee: item.payee || originalPayee,
+          categoryId: matchedCat ? matchedCat.id : undefined,
+          categoryTitle: matchedCat ? matchedCat.title : undefined,
+          merchantId: item.merchant ?? undefined,
+        });
+      });
+    } catch {
+      // Fallback gracefully if suggest endpoint is unreachable
+    }
+
+    return resultMap;
+  }
+
+  public async addExpense(
+    token: string,
+    syncContext: ZenmoneySyncData,
+    input: AddExpenseInput
+  ): Promise<MutationResult> {
+    return this.writeTransaction(token, syncContext, {
+      ...input,
+      direction: 'expense',
+    });
+  }
+
+  public async addIncome(
+    token: string,
+    syncContext: ZenmoneySyncData,
+    input: AddIncomeInput
+  ): Promise<MutationResult> {
+    return this.writeTransaction(token, syncContext, {
+      ...input,
+      direction: 'income',
+    });
+  }
+
+  private async writeTransaction(
+    token: string,
+    syncContext: ZenmoneySyncData,
+    params: {
+      accountId: string;
+      amount: string;
+      date: string;
+      categoryId?: string;
+      payee?: string;
+      comment?: string;
+      direction: 'expense' | 'income';
+    }
+  ): Promise<MutationResult> {
+    const acc = syncContext.accounts.find(
+      (a) => a.id === params.accountId || a.title.toLowerCase() === params.accountId.toLowerCase()
+    );
+    if (!acc) {
+      throw new Error(`Zenmoney account "${params.accountId}" not found.`);
+    }
+    if (!syncContext.userId) {
+      throw new Error('Zenmoney userId missing from sync context. Run sync_data first.');
+    }
+
+    const amountDec = new Decimal(params.amount);
+    if (amountDec.lessThanOrEqualTo(0)) {
+      throw new Error(`Transaction amount must be positive, got ${params.amount}`);
+    }
+
+    const instrumentId = acc.instrumentId ?? syncContext.defaultInstrumentId ?? 2;
+    const now = Math.floor(Date.now() / 1000);
+    const txId = randomUUID();
+    const numericAmount = amountDec.toDecimalPlaces(2).toNumber();
+
+    const transactionPayload = {
+      id: txId,
+      changed: now,
+      created: now,
+      user: syncContext.userId,
+      deleted: false,
+      hold: null,
+      viewed: false,
+      incomeInstrument: instrumentId,
+      incomeAccount: acc.id,
+      income: params.direction === 'income' ? numericAmount : 0,
+      incomeBankID: null,
+      outcomeInstrument: instrumentId,
+      outcomeAccount: acc.id,
+      outcome: params.direction === 'expense' ? numericAmount : 0,
+      outcomeBankID: null,
+      opIncome: null,
+      opIncomeInstrument: null,
+      opOutcome: null,
+      opOutcomeInstrument: null,
+      tag: params.categoryId ? [params.categoryId] : null,
+      merchant: null,
+      payee: params.payee ?? null,
+      originalPayee: null,
+      comment: params.comment ?? null,
+      date: params.date,
+      mcc: null,
+      latitude: null,
+      longitude: null,
+      reminderMarker: null,
+      qrCode: null,
+    };
+
+    const res = await fetch(this.diffEndpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        currentClientTimestamp: now,
+        serverTimestamp: syncContext.serverTimestamp ?? 0,
+        transaction: [transactionPayload],
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`Zenmoney v8 diff write failed (HTTP ${res.status}): ${errText}`);
+    }
+
+    const rawResp = await res.json();
+    const validated = DiffResponseSchema.parse(rawResp);
+    if (validated.serverTimestamp) {
+      syncContext.serverTimestamp = validated.serverTimestamp;
+    }
+
+    return {
+      id: txId,
+      serverTimestamp: validated.serverTimestamp,
+    };
+  }
+}
+
+export const v8Mutations = new ZenmoneyV8MutationService();
