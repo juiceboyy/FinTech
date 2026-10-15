@@ -114,6 +114,61 @@
       </aside>
     </main>
 
+    <!-- ING Credit Card CSV Importer -->
+    <section class="panel importer-section" id="importer-panel">
+      <div class="panel-header">
+        <div class="panel-title-wrap">
+          <h2>ING Credit Card CSV Importer</h2>
+          <span class="panel-meta">Syncs to ING Creditcard via Zenmoney MCP</span>
+        </div>
+        <div class="importer-toolbar">
+          <label for="ing-csv-input" class="btn btn-secondary file-upload-label">
+            Select ING CSV File
+          </label>
+          <input type="file" id="ing-csv-input" accept=".csv,text/csv" class="sr-only">
+        </div>
+      </div>
+
+      <div id="importer-feedback" class="importer-feedback" style="display: none;"></div>
+
+      <div id="importer-staging" style="display: none;">
+        <div class="importer-controls-bar">
+          <div class="importer-account-group">
+            <label for="importer-account-select" class="importer-label">Target Account</label>
+            <select id="importer-account-select" class="form-select"></select>
+          </div>
+          <div class="importer-summary-metrics">
+            <span id="importer-stats-selected">0 selected</span>
+            <span id="importer-stats-total">EUR 0.00</span>
+            <span id="importer-stats-skipped" class="text-muted">0 skipped</span>
+          </div>
+          <div class="importer-action-group">
+            <button type="button" id="importer-cancel-btn" class="btn btn-secondary">Cancel Draft</button>
+            <button type="button" id="importer-commit-btn" class="btn btn-primary">Confirm &amp; Sync Selected to Zenmoney</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="ledger-table importer-table">
+            <thead>
+              <tr>
+                <th class="col-check">
+                  <input type="checkbox" id="importer-select-all" title="Toggle all non-duplicate rows">
+                </th>
+                <th>Date</th>
+                <th>Payee / Merchant</th>
+                <th>Category</th>
+                <th>Comment</th>
+                <th>Status</th>
+                <th class="text-right">Amount (EUR)</th>
+              </tr>
+            </thead>
+            <tbody id="importer-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- Recent Transactions Table -->
     <section class="panel transactions-section">
       <div class="panel-header">
@@ -148,5 +203,6 @@
   </div>
 
   <script src="/app.js"></script>
+  <script src="/importer.js"></script>
 </body>
 </html>

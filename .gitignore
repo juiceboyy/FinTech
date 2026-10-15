@@ -4,5 +4,6 @@ dist/
 .zenmoney-session.json
 data/reports/*.json
 !data/reports/.gitkeep
+data/imports/*.json
 *.log
 .DS_Store
