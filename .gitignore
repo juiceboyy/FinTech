@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.zenmoney-session.json
+data/reports/*.json
+!data/reports/.gitkeep
+*.log
+.DS_Store

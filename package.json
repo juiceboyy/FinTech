@@ -1,0 +1,37 @@
+{
+  "name": "zenmoney-fintech-mcp",
+  "version": "1.0.0",
+  "description": "Fintech application connecting to remote Zenmoney MCP endpoint with Gemini AI Health Check",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "node --test dist/test/*.js || tsx test/smoke.test.ts"
+  },
+  "keywords": [
+    "zenmoney",
+    "mcp",
+    "fintech",
+    "gemini",
+    "finance",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@google/genai": "^2.29.1",
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.4",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}
