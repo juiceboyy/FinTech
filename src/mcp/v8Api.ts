@@ -1,3 +1,4 @@
+import { Decimal } from 'decimal.js';
 import type {
   ZenmoneyAccount,
   ZenmoneyTransaction,
@@ -114,6 +115,11 @@ export class ZenmoneyV8SyncService {
       merchantMap.set(m.id, m.title);
     }
 
+    const accountMap = new Map<string, string>();
+    for (const a of data.account || []) {
+      accountMap.set(a.id, a.title.trim());
+    }
+
     const primaryUser = data.user && data.user.length > 0 ? data.user[0] : undefined;
 
     const accounts: ZenmoneyAccount[] = (data.account || [])
@@ -122,7 +128,7 @@ export class ZenmoneyV8SyncService {
         id: a.id,
         title: a.title,
         type: (a.type as ZenmoneyAccount['type']) || 'checking',
-        balance: Number(a.balance) || 0,
+        balance: new Decimal(a.balance || 0).toDecimalPlaces(2).toNumber(),
         currency: 'EUR',
         instrumentId: a.instrument ?? primaryUser?.currency ?? 2,
       }));
@@ -130,17 +136,39 @@ export class ZenmoneyV8SyncService {
     const transactions: ZenmoneyTransaction[] = (data.transaction || [])
       .filter((t) => !t.deleted)
       .map((t) => {
+        const incDec = new Decimal(t.income || 0);
+        const outDec = new Decimal(t.outcome || 0);
+        const isTransfer =
+          (incDec.greaterThan(0) && outDec.greaterThan(0)) ||
+          (Boolean(t.incomeAccount) && Boolean(t.outcomeAccount) && t.incomeAccount !== t.outcomeAccount);
+
+        const incomeAccountTitle = t.incomeAccount ? accountMap.get(t.incomeAccount) : undefined;
+        const outcomeAccountTitle = t.outcomeAccount ? accountMap.get(t.outcomeAccount) : undefined;
+
         const firstTag = t.tag && t.tag.length > 0 ? t.tag[0] : undefined;
-        const categoryTitle = firstTag ? tagMap.get(firstTag) || 'General' : 'General';
-        const payeeName = t.payee ? merchantMap.get(t.payee) || t.payee || t.comment || 'Transaction' : t.comment || 'Transaction';
+        const categoryTitle = isTransfer
+          ? 'Internal Transfer'
+          : firstTag
+            ? tagMap.get(firstTag) || 'General'
+            : 'General';
+
+        const transferLabel = `Transfer: ${outcomeAccountTitle || 'Account'} -> ${incomeAccountTitle || 'Account'}`;
+        const payeeName = isTransfer
+          ? transferLabel
+          : t.payee
+            ? merchantMap.get(t.payee) || t.payee || t.comment || 'Transaction'
+            : t.comment || 'Transaction';
 
         return {
           id: t.id,
           date: t.date,
-          income: Number(t.income) || 0,
-          outcome: Number(t.outcome) || 0,
+          income: incDec.toDecimalPlaces(2).toNumber(),
+          outcome: outDec.toDecimalPlaces(2).toNumber(),
           incomeAccount: t.incomeAccount,
           outcomeAccount: t.outcomeAccount,
+          incomeAccountTitle,
+          outcomeAccountTitle,
+          isTransfer,
           category: firstTag,
           categoryTitle,
           payee: payeeName,

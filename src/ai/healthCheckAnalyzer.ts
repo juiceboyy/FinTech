@@ -1,3 +1,4 @@
+import { Decimal } from 'decimal.js';
 import { geminiService, GEMINI_MODEL } from './geminiClient.js';
 import { reportStorage, type StoredReport } from './reportStorage.js';
 import type { NormalizedFinancialSummary } from '../engine/types.js';
@@ -29,22 +30,60 @@ export class HealthCheckAnalyzer {
   }
 
   private async generateGeminiReport(summary: NormalizedFinancialSummary): Promise<string> {
+    const accountsBreakdown =
+      summary.accounts.length > 0
+        ? summary.accounts
+            .map((a) => `- ${a.title} [${a.type}]: EUR ${new Decimal(a.balance).toFixed(2)}`)
+            .join('\n')
+        : 'No active accounts listed.';
+
+    const transfersBreakdown =
+      summary.internalTransfers && summary.internalTransfers.length > 0
+        ? summary.internalTransfers
+            .map((t) => {
+              const roleTag = t.isSavingsAllocation ? ' [Savings/Buffer Allocation]' : ' [Internal Account Transfer]';
+              const cleanNote = t.comment ? ` (Note: ${t.comment.replace(/<br\s*\/?>/gi, ', ').trim()})` : '';
+              return `- ${t.date} | ${t.fromAccount} -> ${t.toAccount}: EUR ${new Decimal(t.amount).toFixed(2)}${roleTag}${cleanNote}`;
+            })
+            .join('\n')
+        : 'None recorded in this period.';
+
+    const anomaliesBreakdown =
+      summary.topAnomalies.length > 0
+        ? summary.topAnomalies
+            .map((a) => `- ${a.date} | ${a.payee} (${a.category}): EUR ${new Decimal(a.amount).toFixed(2)} - ${a.reason}`)
+            .join('\n')
+        : 'None detected.';
+
     const prompt = `
 Generate a structured 15-day financial health audit based on the following verified financial metrics:
 
 Financial Context (${summary.startDate} to ${summary.endDate}, ${summary.periodDays} days):
-- Total Income: EUR ${summary.totalIncome.toFixed(2)}
-- Total Expenses: EUR ${summary.totalExpenses.toFixed(2)}
-- Net Cash Flow: EUR ${summary.netCashFlow.toFixed(2)}
-- Savings Rate: ${summary.savingsRatePercentage.toFixed(1)}%
-- Total Liquid Reserves: EUR ${summary.totalLiquidBalance.toFixed(2)}
+- Total External Income: EUR ${new Decimal(summary.totalIncome).toFixed(2)}
+- Total External Expenses: EUR ${new Decimal(summary.totalExpenses).toFixed(2)}
+- Net Cash Flow: EUR ${new Decimal(summary.netCashFlow).toFixed(2)}
+- Savings Rate: ${new Decimal(summary.savingsRatePercentage).toFixed(1)}%
+- Total Liquid Reserves: EUR ${new Decimal(summary.totalLiquidBalance).toFixed(2)}
+- Total Internal Transfers (Excluded from Expenses): EUR ${new Decimal(summary.totalInternalTransfers || 0).toFixed(2)}
+- Dedicated Savings / Buffer Allocations: EUR ${new Decimal(summary.savingsTransfersTotal || 0).toFixed(2)}
 - Source Data Mode: ${summary.sourceMode.toUpperCase()}
 
-Category Expenses Breakdown:
-${summary.categoryBreakdown.map((c) => `- ${c.category}: EUR ${c.amount.toFixed(2)} (${c.percentage.toFixed(1)}% of expenses)`).join('\n')}
+Active Account Balances:
+${accountsBreakdown}
 
-Detected Outlier & Anomalous Transactions:
-${summary.topAnomalies.length > 0 ? summary.topAnomalies.map((a) => `- ${a.date} | ${a.payee} (${a.category}): EUR ${a.amount.toFixed(2)} - ${a.reason}`).join('\n') : 'None detected.'}
+Internal Account Transfers & Savings Allocations (Excluded from Gross Income & Expenses):
+${transfersBreakdown}
+
+Category Expenses Breakdown (External Outflows Only):
+${summary.categoryBreakdown.map((c) => `- ${c.category}: EUR ${new Decimal(c.amount).toFixed(2)} (${new Decimal(c.percentage).toFixed(1)}% of expenses)`).join('\n')}
+
+Detected High-Value External Expenditures (>= EUR 250):
+${anomaliesBreakdown}
+
+Domain Rules & Analytical Guidance:
+- Internal transfers between the user's own accounts (such as Privé -> Buffer savings allocations or Privé -> ING Creditcard settlements) are NOT expenses and have already been excluded from Total External Expenses and Anomalies.
+- Explicitly acknowledge transfers into Buffer or savings accounts as disciplined capital allocation and reserve building within the Savings Rate & Liquidity Benchmark section.
+- When evaluating high-value expenditures, distinguish fixed contractual obligations (such as lease car payments, rent, or household bills noted in transaction comments) from discretionary spending outliers.
 
 Format the report using clean Markdown with these exact sections:
 1. ### Executive Cash Flow Assessment
@@ -66,39 +105,57 @@ Formatting constraints:
   }
 
   private generateDeterministicReport(summary: NormalizedFinancialSummary): string {
-    const isPositiveFlow = summary.netCashFlow >= 0;
+    const netFlowDec = new Decimal(summary.netCashFlow);
+    const totalIncDec = new Decimal(summary.totalIncome);
+    const totalExpDec = new Decimal(summary.totalExpenses);
+    const savingsRateDec = new Decimal(summary.savingsRatePercentage);
+    const liquidDec = new Decimal(summary.totalLiquidBalance);
+    const savingsAllocDec = new Decimal(summary.savingsTransfersTotal || 0);
+
+    const isPositiveFlow = netFlowDec.greaterThanOrEqualTo(0);
     const flowAssessment = isPositiveFlow
-      ? `The portfolio produced a positive cash flow of EUR ${summary.netCashFlow.toFixed(2)}, demonstrating disciplined expenditure control across the 15-day reporting cycle.`
-      : `The portfolio experienced a net negative cash flow of EUR ${Math.abs(summary.netCashFlow).toFixed(2)}, requiring immediate monitoring of discretionary outflow.`;
+      ? `The portfolio produced a positive cash flow of EUR ${netFlowDec.toFixed(2)}, demonstrating disciplined expenditure control across the 15-day reporting cycle.`
+      : `The portfolio experienced a net negative cash flow of EUR ${netFlowDec.abs().toFixed(2)}, requiring immediate monitoring of discretionary outflow.`;
 
     const topCategory = summary.categoryBreakdown[0]
-      ? `${summary.categoryBreakdown[0].category} (EUR ${summary.categoryBreakdown[0].amount.toFixed(2)}, ${summary.categoryBreakdown[0].percentage.toFixed(1)}% of total outlays)`
+      ? `${summary.categoryBreakdown[0].category} (EUR ${new Decimal(summary.categoryBreakdown[0].amount).toFixed(2)}, ${new Decimal(summary.categoryBreakdown[0].percentage).toFixed(1)}% of total outlays)`
       : 'None recorded';
 
+    const savingsTransferSummary =
+      summary.internalTransfers && summary.internalTransfers.length > 0
+        ? summary.internalTransfers
+            .map((t) => `- Internal Transfer (${t.date}): EUR ${new Decimal(t.amount).toFixed(2)} from ${t.fromAccount} to ${t.toAccount}${t.isSavingsAllocation ? ' (Savings/Buffer allocation)' : ''}`)
+            .join('\n')
+        : '- No internal account transfers recorded during this cycle.';
+
     const anomalyText = summary.topAnomalies.length > 0
-      ? summary.topAnomalies.map((a) => `- ${a.date}: EUR ${a.amount.toFixed(2)} at ${a.payee} (${a.category}) - ${a.reason}`).join('\n')
-      : 'No transactions met or exceeded the outlier threshold of EUR 250.';
+      ? summary.topAnomalies.map((a) => `- ${a.date}: EUR ${new Decimal(a.amount).toFixed(2)} at ${a.payee} (${a.category}) - ${a.reason}`).join('\n')
+      : 'No external transactions met or exceeded the outlier threshold of EUR 250.';
+
+    const emergencyReserveTarget = totalExpDec.times(3).toFixed(2);
 
     return `### Executive Cash Flow Assessment
-${flowAssessment} Total revenue stood at EUR ${summary.totalIncome.toFixed(2)} against gross outlays of EUR ${summary.totalExpenses.toFixed(2)} across ${summary.transactionsCount} recorded events.
+${flowAssessment} Total external revenue stood at EUR ${totalIncDec.toFixed(2)} against gross external outlays of EUR ${totalExpDec.toFixed(2)} across ${summary.transactionsCount} recorded events.
 
 ### Savings Rate & Liquidity Benchmark
-- Observed Savings Rate: ${summary.savingsRatePercentage.toFixed(1)}%
+- Observed Cash Flow Savings Rate: ${savingsRateDec.toFixed(1)}%
+- Dedicated Buffer / Savings Transfers: EUR ${savingsAllocDec.toFixed(2)}
 - Target Benchmark: 20.0% (50/30/20 guideline)
-- Liquid Capital Available: EUR ${summary.totalLiquidBalance.toFixed(2)}
-The current savings rate ${summary.savingsRatePercentage >= 20 ? 'meets and exceeds' : 'falls short of'} the classical 20% accumulation threshold.
+- Liquid Capital Available: EUR ${liquidDec.toFixed(2)}
+${savingsTransferSummary}
+The current savings rate ${savingsRateDec.greaterThanOrEqualTo(20) ? 'meets and exceeds' : 'falls short of'} the classical 20% accumulation threshold.
 
 ### Category Velocity & Budget Analysis
 - Primary Expenditure Vector: ${topCategory}
 - Total Active Categories: ${summary.categoryBreakdown.length}
-${summary.categoryBreakdown.slice(0, 5).map((c) => `- ${c.category}: EUR ${c.amount.toFixed(2)} (${c.percentage.toFixed(1)}%)`).join('\n')}
+${summary.categoryBreakdown.slice(0, 5).map((c) => `- ${c.category}: EUR ${new Decimal(c.amount).toFixed(2)} (${new Decimal(c.percentage).toFixed(1)}%)`).join('\n')}
 
 ### Anomaly & Outlier Identification
 ${anomalyText}
 
 ### Tactical Directives for the Next 15 Days
 1. Calibrate discretionary outlays in ${summary.categoryBreakdown[0]?.category || 'high-volume categories'} to maintain net positive liquidity.
-2. Maintain emergency cash reserves at or above EUR ${(summary.totalExpenses * 3).toFixed(2)} to cover three months of basic operational expenses.
+2. Maintain emergency cash reserves at or above EUR ${emergencyReserveTarget} to cover three months of basic operational expenses.
 3. Review auto-renewing subscriptions and non-essential merchant charges before the upcoming cycle reconciliation.`;
   }
 }

@@ -31,6 +31,9 @@ export interface ZenmoneyTransaction {
   outcome: number;
   incomeAccount?: string;
   outcomeAccount?: string;
+  incomeAccountTitle?: string;
+  outcomeAccountTitle?: string;
+  isTransfer?: boolean;
   category?: string;
   categoryTitle?: string;
   payee?: string;
