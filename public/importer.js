@@ -1,39 +1,6 @@
 let activeDraftBatch = null;
 let availableCategories = [];
 
-function parseEurToCents(amountStr) {
-  const parts = String(amountStr || '0.00').trim().split('.');
-  const euros = parseInt(parts[0] || '0', 10);
-  const cents = parseInt((parts[1] || '00').padEnd(2, '0').slice(0, 2), 10);
-  return euros * 100 + cents;
-}
-
-function formatCentsToEur(totalCents) {
-  const absCents = Math.abs(totalCents);
-  return `${Math.floor(absCents / 100)}.${String(absCents % 100).padStart(2, '0')}`;
-}
-
-function escapeHtml(str) {
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function showFeedback(message, type) {
-  const box = document.getElementById('importer-feedback');
-  if (!box) return;
-  box.style.display = 'block';
-  box.textContent = message;
-  box.style.borderLeftColor =
-    type === 'error' ? 'var(--negative)' : type === 'success' ? 'var(--positive)' : 'var(--border-light)';
-}
-
-function hideFeedback() {
-  const box = document.getElementById('importer-feedback');
-  if (box) box.style.display = 'none';
-}
 
 function updateStagingSummary() {
   if (!activeDraftBatch) return;
@@ -52,6 +19,10 @@ function updateStagingSummary() {
     }
   });
 
+  const uncommittedSelected = activeDraftBatch.items.filter(
+    (item) => item.selected && item.state !== 'SETTLED'
+  );
+
   const selEl = document.getElementById('importer-stats-selected');
   const totEl = document.getElementById('importer-stats-total');
   const skipEl = document.getElementById('importer-stats-skipped');
@@ -60,16 +31,10 @@ function updateStagingSummary() {
   if (selEl) selEl.textContent = `${selectedCount} selected`;
   if (totEl) totEl.textContent = `EUR ${formatCentsToEur(totalExpenseCents)} outflow`;
   if (skipEl) skipEl.textContent = `${skippedCount} skipped`;
-  if (commitBtn) commitBtn.disabled = selectedCount === 0;
+  if (commitBtn) commitBtn.disabled = uncommittedSelected.length === 0;
 }
 
-function formatItemStatus(item) {
-  if (item.state === 'SETTLED') return 'SETTLED';
-  if (item.state === 'FAILED') return `FAILED (${item.error || 'Error'})`;
-  if (item.isDuplicate) return 'DUPLICATE - SKIP';
-  if (item.isRepayment) return 'REPAYMENT - SKIP';
-  return item.state || 'DRAFT';
-}
+
 
 function bindStagingTableEvents(tbody) {
   tbody.addEventListener('change', (e) => {
@@ -125,18 +90,25 @@ function renderStagingTable(batch, accounts, categories) {
           (c) => `<option value="${escapeHtml(c.id)}" ${c.id === item.categoryId ? 'selected' : ''}>${escapeHtml(c.title)}</option>`
         ),
       ].join('');
+      const isSettled = item.state === 'SETTLED';
       const sign = item.direction === 'expense' ? '-' : '+';
       const amtClass = item.direction === 'expense' ? 'amount-expense' : 'amount-income';
-      const rowClass = !item.selected ? 'importer-row-skipped' : '';
+      const rowClass = isSettled ? 'importer-row-settled' : !item.selected ? 'importer-row-skipped' : '';
+      const statusText = escapeHtml(formatItemStatus(item));
+      const statusMarkup = isSettled
+        ? `<span class="status-settled">${statusText}</span>`
+        : statusText;
 
       return `
         <tr data-index="${idx}" class="${rowClass}">
-          <td class="col-check"><input type="checkbox" class="importer-row-check" data-index="${idx}" ${item.selected ? 'checked' : ''}></td>
+          <td class="col-check">
+            <input type="checkbox" class="importer-row-check" data-index="${idx}" ${item.selected ? 'checked' : ''} ${isSettled ? 'disabled' : ''}>
+          </td>
           <td>${escapeHtml(item.date)}</td>
-          <td><input type="text" class="table-input importer-payee-input" data-index="${idx}" value="${escapeHtml(item.payee)}"></td>
-          <td><select class="form-select importer-cat-select" data-index="${idx}">${catOptions}</select></td>
-          <td><input type="text" class="table-input importer-comment-input" data-index="${idx}" value="${escapeHtml(item.comment || '')}" placeholder="Optional note"></td>
-          <td>${escapeHtml(formatItemStatus(item))}</td>
+          <td><input type="text" class="table-input importer-payee-input" data-index="${idx}" value="${escapeHtml(item.payee)}" ${isSettled ? 'disabled' : ''}></td>
+          <td><select class="form-select importer-cat-select" data-index="${idx}" ${isSettled ? 'disabled' : ''}>${catOptions}</select></td>
+          <td><input type="text" class="table-input importer-comment-input" data-index="${idx}" value="${escapeHtml(item.comment || '')}" placeholder="Optional note" ${isSettled ? 'disabled' : ''}></td>
+          <td>${statusMarkup}</td>
           <td class="text-right ${amtClass}">${sign}${escapeHtml(item.amount)}</td>
         </tr>`;
     })
@@ -157,7 +129,12 @@ async function handleCsvFileSelection(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ csvContent, fileName: file.name }),
     });
-    const data = await res.json();
+
+    const contentType = res.headers.get('content-type') || '';
+    const data = contentType.includes('application/json')
+      ? await res.json()
+      : { success: false, error: await res.text() };
+
     if (!res.ok || !data.success) {
       showFeedback(data.error || 'Failed to parse ING CSV file.', 'error');
       return;
@@ -206,7 +183,15 @@ async function commitSelectedTransactions() {
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
+    const contentType = res.headers.get('content-type') || '';
+    let data;
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const text = await res.text();
+      throw new Error(`Server returned status ${res.status}: ${text.slice(0, 120)}`);
+    }
+
     if (!res.ok || !data.success) {
       showFeedback(data.error || 'Failed to commit transactions to Zenmoney.', 'error');
       return;
@@ -214,7 +199,12 @@ async function commitSelectedTransactions() {
 
     const s = data.summary;
     activeDraftBatch.items = s.items;
-    renderStagingTable(activeDraftBatch, [{ id: targetAccountId, title: activeDraftBatch.targetAccountTitle, type: 'ccard' }], availableCategories);
+    renderStagingTable(
+      activeDraftBatch,
+      [{ id: targetAccountId, title: activeDraftBatch.targetAccountTitle, type: 'ccard' }],
+      availableCategories
+    );
+
     showFeedback(
       `Sync complete: ${s.settledCount} settled (EUR ${s.settledExpenseTotal} outflow), ${s.skippedCount} skipped, ${s.failedCount} failed.`,
       s.failedCount > 0 ? 'error' : 'success'
@@ -226,8 +216,8 @@ async function commitSelectedTransactions() {
   } catch (err) {
     showFeedback(`Commit error: ${err.message || String(err)}`, 'error');
   } finally {
-    commitBtn.disabled = false;
-    commitBtn.textContent = 'Confirm & Sync Selected to Zenmoney';
+    updateStagingSummary();
+    if (commitBtn) commitBtn.textContent = 'Confirm & Sync Selected to Zenmoney';
   }
 }
 

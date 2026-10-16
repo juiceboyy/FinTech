@@ -277,6 +277,15 @@
   opacity: 0.55;
 }
 
+.importer-row-settled {
+  background: rgba(63, 185, 80, 0.04);
+}
+
+.status-settled {
+  color: var(--positive);
+  font-weight: 500;
+}
+
 .col-check {
   width: 36px;
 }

@@ -165,6 +165,37 @@ export class ZenmoneyMcpClient {
     return { id: randomUUID() };
   }
 
+  public async commitTransactionsBatch(
+    syncContext: ZenmoneySyncData,
+    items: Array<{
+      accountId: string;
+      amount: string;
+      date: string;
+      categoryId?: string;
+      payee?: string;
+      comment?: string;
+      direction: 'expense' | 'income';
+      idempotencyKey: string;
+    }>
+  ): Promise<Map<string, MutationResult>> {
+    const token = authManager.getAccessToken();
+    if (this.isV8Direct && token) {
+      const results = await v8Mutations.writeTransactionsBatch(token, syncContext, items);
+      this.lastSyncAt = new Date().toISOString();
+      return results;
+    }
+
+    const map = new Map<string, MutationResult>();
+    for (const item of items) {
+      const res =
+        item.direction === 'expense'
+          ? await this.addExpense(syncContext, item)
+          : await this.addIncome(syncContext, item);
+      map.set(item.idempotencyKey, res);
+    }
+    return map;
+  }
+
   public isDirectMode(): boolean {
     return this.isV8Direct;
   }

@@ -47,17 +47,15 @@ export class IngImportService {
       const rowAmtDec = new Decimal(row.amount);
       const ledgerHit = settledMap.get(row.idempotencyKey);
 
-      const liveMatch = existingOnAccount.find((tx) => {
-        if (tx.date !== row.date) return false;
-        const txAmt = new Decimal(row.direction === 'expense' ? tx.outcome : tx.income);
-        if (!txAmt.equals(rowAmtDec)) return false;
-        if (tx.comment && tx.comment.includes(row.idempotencyKey.slice(0, 10))) {
-          return true;
-        }
-        const existingPayee = (tx.payee || tx.comment || '').toLowerCase();
-        const candidatePayee = row.payee.toLowerCase().slice(0, 8);
-        return candidatePayee.length > 0 && existingPayee.includes(candidatePayee);
-      });
+      const shortRef = row.idempotencyKey.slice(0, 10);
+      const liveMatch = ImportLedgerStore.findLiveZenmoneyMatch(
+        existingOnAccount,
+        row.date,
+        row.direction,
+        rowAmtDec,
+        shortRef,
+        row.payee
+      );
 
       const isDuplicate = Boolean(ledgerHit || liveMatch);
       const duplicateReason = ledgerHit
@@ -129,104 +127,93 @@ export class IngImportService {
     const targetAccount = ImportLedgerStore.resolveTargetAccount(syncData.accounts, req.accountId);
     const settledMap = ImportLedgerStore.loadSettledLedger();
 
-    let settledCount = 0;
+    const existingOnAccount = syncData.transactions.filter(
+      (tx) => tx.outcomeAccount === targetAccount.id || tx.incomeAccount === targetAccount.id
+    );
+
+    const prepared = ImportLedgerStore.prepareCommitItems(
+      req.items,
+      targetAccount.id,
+      existingOnAccount,
+      settledMap
+    );
+
+    let settledCount = prepared.settledCount;
     let failedCount = 0;
-    let skippedCount = 0;
-    let settledExpenseDec = new Decimal(0);
-    let settledIncomeDec = new Decimal(0);
+    const skippedCount = prepared.skippedCount;
+    let settledExpenseDec = prepared.settledExpenseDec;
+    let settledIncomeDec = prepared.settledIncomeDec;
+    const itemsToCreate = prepared.itemsToCreate;
+    const itemStagingMap = prepared.itemStagingMap;
 
-    const results: StagedImportItem[] = [];
-
-    for (let i = 0; i < req.items.length; i++) {
-      const item = req.items[i];
-      const existingLedger = settledMap.get(item.idempotencyKey);
-
-      if (!item.selected || existingLedger) {
-        skippedCount++;
-        results.push({
-          rowIndex: i,
-          date: item.date,
-          rawPayee: item.payee,
-          payee: item.payee,
-          amount: item.amount,
-          currency: 'EUR',
-          direction: item.direction,
-          comment: item.comment || '',
-          isRepayment: false,
-          idempotencyKey: item.idempotencyKey,
-          categoryId: item.categoryId,
-          isDuplicate: Boolean(existingLedger),
-          duplicateReason: existingLedger ? 'Already settled (idempotency guard)' : undefined,
-          selected: false,
-          state: existingLedger ? 'SETTLED' : 'DRAFT',
-          zenmoneyTxId: existingLedger?.zenmoneyTxId,
-        });
-        continue;
-      }
-
-      const staged: StagedImportItem = {
-        rowIndex: i,
-        date: item.date,
-        rawPayee: item.payee,
-        payee: item.payee,
-        amount: item.amount,
-        currency: 'EUR',
-        direction: item.direction,
-        comment: item.comment || '',
-        isRepayment: false,
-        idempotencyKey: item.idempotencyKey,
-        categoryId: item.categoryId,
-        isDuplicate: false,
-        selected: true,
-        state: 'PENDING',
-      };
-
-      const shortRef = item.idempotencyKey.slice(0, 10);
-      const commentWithRef = item.comment
-        ? `${item.comment} [ing:${shortRef}]`
-        : `[ing:${shortRef}]`;
-
+    if (itemsToCreate.length > 0) {
       try {
-        const mutationArgs = {
-          accountId: targetAccount.id,
-          amount: item.amount,
-          date: item.date,
-          categoryId: item.categoryId || undefined,
-          payee: item.payee,
-          comment: commentWithRef,
-        };
-        const mutationRes =
-          item.direction === 'expense'
-            ? await mcpClient.addExpense(syncData, mutationArgs)
-            : await mcpClient.addIncome(syncData, mutationArgs);
-
-        staged.state = 'SETTLED';
-        staged.zenmoneyTxId = mutationRes.id;
-        settledCount++;
-
-        const amtDec = new Decimal(item.amount);
-        if (item.direction === 'expense') {
-          settledExpenseDec = settledExpenseDec.plus(amtDec);
-        } else {
-          settledIncomeDec = settledIncomeDec.plus(amtDec);
+        const mutationResults = await mcpClient.commitTransactionsBatch(syncData, itemsToCreate);
+        for (const created of itemsToCreate) {
+          const res = mutationResults.get(created.idempotencyKey);
+          const txId = res?.id || randomUUID();
+          settledCount++;
+          const amtDec = new Decimal(created.amount);
+          if (created.direction === 'expense') {
+            settledExpenseDec = settledExpenseDec.plus(amtDec);
+          } else {
+            settledIncomeDec = settledIncomeDec.plus(amtDec);
+          }
+          settledMap.set(created.idempotencyKey, {
+            idempotencyKey: created.idempotencyKey,
+            zenmoneyTxId: txId,
+            accountId: targetAccount.id,
+            settledAt: new Date().toISOString(),
+          });
+          itemStagingMap.set(created.rowIndex, {
+            rowIndex: created.rowIndex,
+            date: created.date,
+            rawPayee: created.payee || '',
+            payee: created.payee || '',
+            amount: created.amount,
+            currency: 'EUR',
+            direction: created.direction,
+            comment: created.comment || '',
+            isRepayment: false,
+            idempotencyKey: created.idempotencyKey,
+            categoryId: created.categoryId,
+            isDuplicate: false,
+            selected: false,
+            state: 'SETTLED',
+            zenmoneyTxId: txId,
+          });
         }
-
-        settledMap.set(item.idempotencyKey, {
-          idempotencyKey: item.idempotencyKey,
-          zenmoneyTxId: mutationRes.id,
-          accountId: targetAccount.id,
-          settledAt: new Date().toISOString(),
-        });
       } catch (err: unknown) {
-        staged.state = 'FAILED';
-        staged.error = err instanceof Error ? err.message : String(err);
-        failedCount++;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        failedCount += itemsToCreate.length;
+        for (const created of itemsToCreate) {
+          itemStagingMap.set(created.rowIndex, {
+            rowIndex: created.rowIndex,
+            date: created.date,
+            rawPayee: created.payee || '',
+            payee: created.payee || '',
+            amount: created.amount,
+            currency: 'EUR',
+            direction: created.direction,
+            comment: created.comment || '',
+            isRepayment: false,
+            idempotencyKey: created.idempotencyKey,
+            categoryId: created.categoryId,
+            isDuplicate: false,
+            selected: true,
+            state: 'FAILED',
+            error: errMsg,
+          });
+        }
       }
-
-      results.push(staged);
     }
 
     ImportLedgerStore.saveSettledLedger(settledMap);
+    const results: StagedImportItem[] = [];
+    for (let i = 0; i < req.items.length; i++) {
+      const entry = itemStagingMap.get(i);
+      if (entry) results.push(entry);
+    }
 
     return {
       batchId: req.batchId,

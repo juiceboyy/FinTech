@@ -94,10 +94,10 @@ export class ZenmoneyV8MutationService {
     syncContext: ZenmoneySyncData,
     input: AddExpenseInput
   ): Promise<MutationResult> {
-    return this.writeTransaction(token, syncContext, {
-      ...input,
-      direction: 'expense',
-    });
+    const results = await this.writeTransactionsBatch(token, syncContext, [
+      { ...input, direction: 'expense', idempotencyKey: randomUUID() },
+    ]);
+    return Array.from(results.values())[0];
   }
 
   public async addIncome(
@@ -105,16 +105,16 @@ export class ZenmoneyV8MutationService {
     syncContext: ZenmoneySyncData,
     input: AddIncomeInput
   ): Promise<MutationResult> {
-    return this.writeTransaction(token, syncContext, {
-      ...input,
-      direction: 'income',
-    });
+    const results = await this.writeTransactionsBatch(token, syncContext, [
+      { ...input, direction: 'income', idempotencyKey: randomUUID() },
+    ]);
+    return Array.from(results.values())[0];
   }
 
-  private async writeTransaction(
+  public async writeTransactionsBatch(
     token: string,
     syncContext: ZenmoneySyncData,
-    params: {
+    items: Array<{
       accountId: string;
       amount: string;
       date: string;
@@ -122,60 +122,71 @@ export class ZenmoneyV8MutationService {
       payee?: string;
       comment?: string;
       direction: 'expense' | 'income';
-    }
-  ): Promise<MutationResult> {
-    const acc = syncContext.accounts.find(
-      (a) => a.id === params.accountId || a.title.toLowerCase() === params.accountId.toLowerCase()
-    );
-    if (!acc) {
-      throw new Error(`Zenmoney account "${params.accountId}" not found.`);
-    }
+      idempotencyKey: string;
+    }>
+  ): Promise<Map<string, MutationResult>> {
+    const resultMap = new Map<string, MutationResult>();
+    if (items.length === 0) return resultMap;
+
     if (!syncContext.userId) {
       throw new Error('Zenmoney userId missing from sync context. Run sync_data first.');
     }
 
-    const amountDec = new Decimal(params.amount);
-    if (amountDec.lessThanOrEqualTo(0)) {
-      throw new Error(`Transaction amount must be positive, got ${params.amount}`);
-    }
-
-    const instrumentId = acc.instrumentId ?? syncContext.defaultInstrumentId ?? 2;
     const now = Math.floor(Date.now() / 1000);
-    const txId = randomUUID();
-    const numericAmount = amountDec.toDecimalPlaces(2).toNumber();
+    const transactionPayloads: unknown[] = [];
 
-    const transactionPayload = {
-      id: txId,
-      changed: now,
-      created: now,
-      user: syncContext.userId,
-      deleted: false,
-      hold: null,
-      viewed: false,
-      incomeInstrument: instrumentId,
-      incomeAccount: acc.id,
-      income: params.direction === 'income' ? numericAmount : 0,
-      incomeBankID: null,
-      outcomeInstrument: instrumentId,
-      outcomeAccount: acc.id,
-      outcome: params.direction === 'expense' ? numericAmount : 0,
-      outcomeBankID: null,
-      opIncome: null,
-      opIncomeInstrument: null,
-      opOutcome: null,
-      opOutcomeInstrument: null,
-      tag: params.categoryId ? [params.categoryId] : null,
-      merchant: null,
-      payee: params.payee ?? null,
-      originalPayee: null,
-      comment: params.comment ?? null,
-      date: params.date,
-      mcc: null,
-      latitude: null,
-      longitude: null,
-      reminderMarker: null,
-      qrCode: null,
-    };
+    for (const item of items) {
+      const acc = syncContext.accounts.find(
+        (a) => a.id === item.accountId || a.title.toLowerCase() === item.accountId.toLowerCase()
+      );
+      if (!acc) {
+        throw new Error(`Zenmoney account "${item.accountId}" not found.`);
+      }
+
+      const amountDec = new Decimal(item.amount);
+      if (amountDec.lessThanOrEqualTo(0)) {
+        throw new Error(`Transaction amount must be positive, got ${item.amount}`);
+      }
+
+      const instrumentId = acc.instrumentId ?? syncContext.defaultInstrumentId ?? 2;
+      const txId = randomUUID();
+      const numericAmount = amountDec.toDecimalPlaces(2).toNumber();
+
+      transactionPayloads.push({
+        id: txId,
+        changed: now,
+        created: now,
+        user: syncContext.userId,
+        deleted: false,
+        hold: null,
+        viewed: false,
+        incomeInstrument: instrumentId,
+        incomeAccount: acc.id,
+        income: item.direction === 'income' ? numericAmount : 0,
+        incomeBankID: null,
+        outcomeInstrument: instrumentId,
+        outcomeAccount: acc.id,
+        outcome: item.direction === 'expense' ? numericAmount : 0,
+        outcomeBankID: null,
+        opIncome: null,
+        opIncomeInstrument: null,
+        opOutcome: null,
+        opOutcomeInstrument: null,
+        tag: item.categoryId ? [item.categoryId] : null,
+        merchant: null,
+        payee: item.payee ?? null,
+        originalPayee: null,
+        comment: item.comment ?? null,
+        date: item.date,
+        mcc: null,
+        latitude: null,
+        longitude: null,
+        reminderMarker: null,
+        qrCode: null,
+      });
+
+      resultMap.set(item.idempotencyKey, { id: txId });
+    }
 
     const res = await fetch(this.diffEndpoint, {
       method: 'POST',
@@ -186,7 +197,7 @@ export class ZenmoneyV8MutationService {
       body: JSON.stringify({
         currentClientTimestamp: now,
         serverTimestamp: syncContext.serverTimestamp ?? 0,
-        transaction: [transactionPayload],
+        transaction: transactionPayloads,
       }),
     });
 
@@ -199,13 +210,14 @@ export class ZenmoneyV8MutationService {
     const validated = DiffResponseSchema.parse(rawResp);
     if (validated.serverTimestamp) {
       syncContext.serverTimestamp = validated.serverTimestamp;
+      for (const val of resultMap.values()) {
+        val.serverTimestamp = validated.serverTimestamp;
+      }
     }
 
-    return {
-      id: txId,
-      serverTimestamp: validated.serverTimestamp,
-    };
+    return resultMap;
   }
 }
 
 export const v8Mutations = new ZenmoneyV8MutationService();
+
