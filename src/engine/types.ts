@@ -1,4 +1,9 @@
-import type { ZenmoneyAccount, ZenmoneyTransaction, ZenmoneyBudget } from '../mcp/types.js';
+import type {
+  ZenmoneyAccount,
+  ZenmoneyTransaction,
+  ZenmoneyPlannedTransaction,
+  ZenmoneyBudget,
+} from '../mcp/types.js';
 
 export interface CategoryExpense {
   category: string;
@@ -15,6 +20,28 @@ export interface InternalTransferItem {
   amount: number;
   comment?: string;
   isSavingsAllocation: boolean;
+}
+
+export interface AccountLiquidityAlert {
+  accountId: string;
+  accountTitle: string;
+  currentBalance: number;
+  plannedOutflows: number;
+  plannedInflows: number;
+  projectedEndingBalance: number;
+  shortfallAmount: number;
+}
+
+export interface PlannedCashFlowSummary {
+  horizonDays: number;
+  startDate: string;
+  endDate: string;
+  plannedIncomeTotal: number;
+  plannedExpenseTotal: number;
+  plannedTransferTotal: number;
+  projectedNetCashFlow: number;
+  items: ZenmoneyPlannedTransaction[];
+  liquidityAlerts: AccountLiquidityAlert[];
 }
 
 export interface FinancialAnomaly {
@@ -40,6 +67,7 @@ export interface NormalizedFinancialSummary {
   internalTransfers: InternalTransferItem[];
   totalInternalTransfers: number;
   savingsTransfersTotal: number;
+  plannedSchedule: PlannedCashFlowSummary;
   accounts: ZenmoneyAccount[];
   categoryBreakdown: CategoryExpense[];
   topAnomalies: FinancialAnomaly[];

@@ -2,6 +2,7 @@ import { Decimal } from 'decimal.js';
 import type {
   ZenmoneyAccount,
   ZenmoneyTransaction,
+  ZenmoneyPlannedTransaction,
   ZenmoneyBudget,
   ZenmoneyCategory,
   ZenmoneySyncData,
@@ -26,6 +27,36 @@ interface RawTransaction {
   tag?: string[];
   payee?: string;
   comment?: string;
+  deleted?: boolean;
+}
+
+interface RawReminder {
+  id: string;
+  income?: number;
+  outcome?: number;
+  incomeAccount?: string;
+  outcomeAccount?: string;
+  tag?: string[] | null;
+  merchant?: string | null;
+  payee?: string | null;
+  comment?: string | null;
+  deleted?: boolean;
+}
+
+interface RawReminderMarker {
+  id: string;
+  date: string;
+  income: number;
+  outcome: number;
+  incomeAccount?: string;
+  outcomeAccount?: string;
+  state?: 'planned' | 'processed' | 'deleted';
+  isForecast?: boolean;
+  reminder?: string;
+  tag?: string[] | null;
+  merchant?: string | null;
+  payee?: string | null;
+  comment?: string | null;
   deleted?: boolean;
 }
 
@@ -91,6 +122,8 @@ export class ZenmoneyV8SyncService {
       serverTimestamp?: number;
       account?: RawAccount[];
       transaction?: RawTransaction[];
+      reminder?: RawReminder[];
+      reminderMarker?: RawReminderMarker[];
       tag?: RawTag[];
       merchant?: RawMerchant[];
       user?: RawUser[];
@@ -118,6 +151,13 @@ export class ZenmoneyV8SyncService {
     const accountMap = new Map<string, string>();
     for (const a of data.account || []) {
       accountMap.set(a.id, a.title.trim());
+    }
+
+    const reminderMap = new Map<string, RawReminder>();
+    for (const r of data.reminder || []) {
+      if (!r.deleted) {
+        reminderMap.set(r.id, r);
+      }
     }
 
     const primaryUser = data.user && data.user.length > 0 ? data.user[0] : undefined;
@@ -178,11 +218,69 @@ export class ZenmoneyV8SyncService {
       })
       .sort((a, b) => b.date.localeCompare(a.date));
 
+    const plannedTransactions: ZenmoneyPlannedTransaction[] = (data.reminderMarker || [])
+      .filter((m) => !m.deleted && m.state === 'planned')
+      .map((m) => {
+        const parent = m.reminder ? reminderMap.get(m.reminder) : undefined;
+        const incDec = new Decimal(m.income ?? parent?.income ?? 0);
+        const outDec = new Decimal(m.outcome ?? parent?.outcome ?? 0);
+        const incomeAccount = m.incomeAccount || parent?.incomeAccount;
+        const outcomeAccount = m.outcomeAccount || parent?.outcomeAccount;
+
+        const isTransfer =
+          (incDec.greaterThan(0) && outDec.greaterThan(0)) ||
+          (Boolean(incomeAccount) && Boolean(outcomeAccount) && incomeAccount !== outcomeAccount);
+
+        const incomeAccountTitle = incomeAccount ? accountMap.get(incomeAccount) : undefined;
+        const outcomeAccountTitle = outcomeAccount ? accountMap.get(outcomeAccount) : undefined;
+
+        const firstTag =
+          (m.tag && m.tag.length > 0 ? m.tag[0] : undefined) ||
+          (parent?.tag && parent.tag.length > 0 ? parent.tag[0] : undefined);
+        const categoryTitle = isTransfer
+          ? 'Internal Transfer'
+          : firstTag
+            ? tagMap.get(firstTag) || 'General'
+            : 'General';
+
+        const merchantId = m.merchant || parent?.merchant || undefined;
+        const resolvedMerchant = merchantId ? merchantMap.get(merchantId) : undefined;
+        const rawPayee = m.payee || parent?.payee || undefined;
+        const rawComment = m.comment || parent?.comment || undefined;
+
+        const transferLabel = `Transfer: ${outcomeAccountTitle || 'Account'} -> ${incomeAccountTitle || 'Account'}`;
+        const payeeName = isTransfer
+          ? transferLabel
+          : resolvedMerchant || rawPayee || rawComment || 'Planned Transaction';
+
+        return {
+          id: m.id,
+          reminderId: m.reminder,
+          date: m.date,
+          income: incDec.toDecimalPlaces(2).toNumber(),
+          outcome: outDec.toDecimalPlaces(2).toNumber(),
+          incomeAccount,
+          outcomeAccount,
+          incomeAccountTitle,
+          outcomeAccountTitle,
+          isTransfer,
+          state: m.state || 'planned',
+          isForecast: m.isForecast,
+          category: firstTag,
+          categoryTitle,
+          payee: payeeName,
+          comment: rawComment,
+          currency: 'EUR',
+        };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+
     const budgets: ZenmoneyBudget[] = [];
 
     return {
       accounts,
       transactions,
+      plannedTransactions,
       budgets,
       categories,
       userId: primaryUser?.id,

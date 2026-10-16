@@ -76,48 +76,60 @@ async function fetchFinancialSummary() {
 
     // Categories
     const catList = document.getElementById('category-list');
-    if (data.categoryBreakdown && data.categoryBreakdown.length > 0) {
-      catList.innerHTML = data.categoryBreakdown.slice(0, 6).map((c) => `
+    catList.innerHTML = data.categoryBreakdown?.length
+      ? data.categoryBreakdown.slice(0, 6).map((c) => `
         <div class="category-item">
           <span class="category-name">${c.category}</span>
           <span class="category-stats">EUR ${c.amount.toFixed(2)} (${c.percentage.toFixed(1)}%)</span>
-        </div>
-      `).join('');
-    } else {
-      catList.innerHTML = '<p class="empty-state">No category expenditures in range.</p>';
-    }
+        </div>`).join('')
+      : '<p class="empty-state">No category expenditures in range.</p>';
 
     // Anomalies
     const anomalyList = document.getElementById('anomaly-list');
-    if (data.topAnomalies && data.topAnomalies.length > 0) {
-      anomalyList.innerHTML = data.topAnomalies.map((a) => `
+    anomalyList.innerHTML = data.topAnomalies?.length
+      ? data.topAnomalies.map((a) => `
         <div class="anomaly-item">
-          <div class="anomaly-title">
-            <span>${a.payee}</span>
-            <span>EUR ${a.amount.toFixed(2)}</span>
-          </div>
+          <div class="anomaly-title"><span>${a.payee}</span><span>EUR ${a.amount.toFixed(2)}</span></div>
           <div class="anomaly-desc">${a.date} - ${a.reason}</div>
-        </div>
-      `).join('');
-    } else {
-      anomalyList.innerHTML = '<p class="empty-state">No transaction anomalies detected.</p>';
+        </div>`).join('')
+      : '<p class="empty-state">No transaction anomalies detected.</p>';
+
+    // Planned Schedule
+    const plannedList = document.getElementById('planned-list');
+    if (plannedList) {
+      const items = data.plannedSchedule?.items || [];
+      const alerts = data.plannedSchedule?.liquidityAlerts || [];
+      if (items.length > 0 || alerts.length > 0) {
+        const alertHtml = alerts.map((al) => `
+          <div class="anomaly-item">
+            <div class="anomaly-title"><span>Shortfall: ${al.accountTitle}</span><span class="amount-expense">-EUR ${al.shortfallAmount.toFixed(2)}</span></div>
+            <div class="anomaly-desc">Balance EUR ${al.currentBalance.toFixed(2)} vs EUR ${al.plannedOutflows.toFixed(2)} scheduled debits</div>
+          </div>`).join('');
+        const itemsHtml = items.slice(0, 8).map((pt) => {
+          const isInc = !pt.isTransfer && pt.income > 0;
+          const amt = (pt.outcome > 0 ? pt.outcome : pt.income).toFixed(2);
+          const sign = pt.isTransfer ? '' : isInc ? '+' : '-';
+          const cls = pt.isTransfer ? '' : isInc ? 'amount-income' : 'amount-expense';
+          return `<div class="category-item"><span class="category-name">${pt.date} - ${pt.payee}</span><span class="category-stats ${cls}">${sign}EUR ${amt}</span></div>`;
+        }).join('');
+        plannedList.innerHTML = alertHtml + itemsHtml;
+      } else {
+        plannedList.innerHTML = '<p class="empty-state">No planned transactions in next 30 days.</p>';
+      }
     }
 
     // Transactions Table
     const tbody = document.getElementById('transactions-body');
-    if (data.recentTransactions && data.recentTransactions.length > 0) {
-      tbody.innerHTML = data.recentTransactions.map((tx) => `
+    tbody.innerHTML = data.recentTransactions?.length
+      ? data.recentTransactions.map((tx) => `
         <tr>
           <td>${tx.date}</td>
           <td>${tx.payee || tx.comment || 'Transaction'}</td>
           <td>${tx.categoryTitle || tx.category || 'General'}</td>
           <td class="text-right amount-income">${tx.income > 0 ? `+${tx.income.toFixed(2)}` : '-'}</td>
           <td class="text-right amount-expense">${tx.outcome > 0 ? `-${tx.outcome.toFixed(2)}` : '-'}</td>
-        </tr>
-      `).join('');
-    } else {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-center">No recent transactions recorded.</td></tr>';
-    }
+        </tr>`).join('')
+      : '<tr><td colspan="5" class="text-center">No recent transactions recorded.</td></tr>';
   } catch (err) {
     console.error('Error fetching summary:', err);
   }

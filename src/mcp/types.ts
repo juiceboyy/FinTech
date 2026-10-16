@@ -41,6 +41,26 @@ export interface ZenmoneyTransaction {
   currency?: string;
 }
 
+export interface ZenmoneyPlannedTransaction {
+  id: string;
+  reminderId?: string;
+  date: string; // YYYY-MM-DD
+  income: number;
+  outcome: number;
+  incomeAccount?: string;
+  outcomeAccount?: string;
+  incomeAccountTitle?: string;
+  outcomeAccountTitle?: string;
+  isTransfer: boolean;
+  state: 'planned' | 'processed' | 'deleted';
+  isForecast?: boolean;
+  category?: string;
+  categoryTitle: string;
+  payee: string;
+  comment?: string;
+  currency: string;
+}
+
 export interface ZenmoneyBudget {
   id: string;
   date: string;
@@ -53,6 +73,7 @@ export interface ZenmoneyBudget {
 export interface ZenmoneySyncData {
   accounts: ZenmoneyAccount[];
   transactions: ZenmoneyTransaction[];
+  plannedTransactions?: ZenmoneyPlannedTransaction[];
   budgets: ZenmoneyBudget[];
   categories?: ZenmoneyCategory[];
   userId?: number;

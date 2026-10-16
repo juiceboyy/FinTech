@@ -1,10 +1,17 @@
 import { Decimal } from 'decimal.js';
-import type { ZenmoneyAccount, ZenmoneyTransaction, ZenmoneyBudget } from '../mcp/types.js';
+import type {
+  ZenmoneyAccount,
+  ZenmoneyTransaction,
+  ZenmoneyPlannedTransaction,
+  ZenmoneyBudget,
+} from '../mcp/types.js';
 import type {
   NormalizedFinancialSummary,
   CategoryExpense,
   FinancialAnomaly,
   InternalTransferItem,
+  PlannedCashFlowSummary,
+  AccountLiquidityAlert,
 } from './types.js';
 
 const SAVINGS_ACCOUNT_REGEX = /buffer|spaar|saving|reserve|vault/i;
@@ -13,11 +20,14 @@ export class FinancialDataNormalizer {
   public static normalize(params: {
     accounts: ZenmoneyAccount[];
     transactions: ZenmoneyTransaction[];
+    plannedTransactions?: ZenmoneyPlannedTransaction[];
     budgets: ZenmoneyBudget[];
     periodDays?: number;
+    forecastHorizonDays?: number;
     sourceMode?: 'live';
   }): NormalizedFinancialSummary {
     const periodDays = params.periodDays || 15;
+    const forecastHorizonDays = params.forecastHorizonDays || 30;
     const sourceMode = 'live';
 
     const now = new Date();
@@ -144,6 +154,14 @@ export class FinancialDataNormalizer {
       .filter((acc) => ['checking', 'deposit', 'cash'].includes(acc.type))
       .reduce((sum, acc) => sum.plus(new Decimal(acc.balance || 0)), new Decimal(0));
 
+    const plannedSchedule = this.normalizePlannedSchedule({
+      accounts: params.accounts,
+      accountById,
+      plannedTransactions: params.plannedTransactions || [],
+      todayDate: endDate,
+      horizonDays: forecastHorizonDays,
+    });
+
     return {
       periodDays,
       startDate,
@@ -156,6 +174,7 @@ export class FinancialDataNormalizer {
       internalTransfers,
       totalInternalTransfers: totalInternalTransfersDec.toDecimalPlaces(2).toNumber(),
       savingsTransfersTotal: savingsTransfersDec.toDecimalPlaces(2).toNumber(),
+      plannedSchedule,
       accounts: params.accounts,
       categoryBreakdown,
       topAnomalies,
@@ -163,6 +182,96 @@ export class FinancialDataNormalizer {
       recentTransactions: filtered.slice(0, 15),
       budgets: params.budgets,
       sourceMode,
+    };
+  }
+
+  private static normalizePlannedSchedule(params: {
+    accounts: ZenmoneyAccount[];
+    accountById: Map<string, ZenmoneyAccount>;
+    plannedTransactions: ZenmoneyPlannedTransaction[];
+    todayDate: string;
+    horizonDays: number;
+  }): PlannedCashFlowSummary {
+    const horizonDateObj = new Date(`${params.todayDate}T00:00:00Z`);
+    horizonDateObj.setUTCDate(horizonDateObj.getUTCDate() + params.horizonDays);
+    const forecastEndDate = horizonDateObj.toISOString().split('T')[0];
+
+    const upcoming = params.plannedTransactions
+      .filter((pt) => pt.state === 'planned' && pt.date >= params.todayDate && pt.date <= forecastEndDate)
+      .map((pt) => {
+        const fromAcc = pt.outcomeAccount ? params.accountById.get(pt.outcomeAccount) : undefined;
+        const toAcc = pt.incomeAccount ? params.accountById.get(pt.incomeAccount) : undefined;
+        return {
+          ...pt,
+          outcomeAccountTitle: pt.outcomeAccountTitle || fromAcc?.title,
+          incomeAccountTitle: pt.incomeAccountTitle || toAcc?.title,
+        };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    let plannedIncomeDec = new Decimal(0);
+    let plannedExpenseDec = new Decimal(0);
+    let plannedTransferDec = new Decimal(0);
+
+    const inflowsByAcc = new Map<string, Decimal>();
+    const outflowsByAcc = new Map<string, Decimal>();
+
+    for (const item of upcoming) {
+      const inc = new Decimal(item.income || 0);
+      const out = new Decimal(item.outcome || 0);
+
+      if (item.isTransfer) {
+        const transferAmt = out.greaterThan(0) ? out : inc;
+        plannedTransferDec = plannedTransferDec.plus(transferAmt);
+        if (item.outcomeAccount) {
+          outflowsByAcc.set(item.outcomeAccount, (outflowsByAcc.get(item.outcomeAccount) || new Decimal(0)).plus(out));
+        }
+        if (item.incomeAccount) {
+          inflowsByAcc.set(item.incomeAccount, (inflowsByAcc.get(item.incomeAccount) || new Decimal(0)).plus(inc));
+        }
+      } else {
+        plannedIncomeDec = plannedIncomeDec.plus(inc);
+        plannedExpenseDec = plannedExpenseDec.plus(out);
+        if (inc.greaterThan(0) && item.incomeAccount) {
+          inflowsByAcc.set(item.incomeAccount, (inflowsByAcc.get(item.incomeAccount) || new Decimal(0)).plus(inc));
+        }
+        if (out.greaterThan(0) && item.outcomeAccount) {
+          outflowsByAcc.set(item.outcomeAccount, (outflowsByAcc.get(item.outcomeAccount) || new Decimal(0)).plus(out));
+        }
+      }
+    }
+
+    const liquidityAlerts: AccountLiquidityAlert[] = [];
+    for (const acc of params.accounts) {
+      const outDec = outflowsByAcc.get(acc.id) || new Decimal(0);
+      if (outDec.lessThanOrEqualTo(0)) continue;
+      const inDec = inflowsByAcc.get(acc.id) || new Decimal(0);
+      const balDec = new Decimal(acc.balance || 0);
+      const projectedEndingDec = balDec.plus(inDec).minus(outDec);
+
+      if (projectedEndingDec.lessThan(0)) {
+        liquidityAlerts.push({
+          accountId: acc.id,
+          accountTitle: acc.title,
+          currentBalance: balDec.toDecimalPlaces(2).toNumber(),
+          plannedOutflows: outDec.toDecimalPlaces(2).toNumber(),
+          plannedInflows: inDec.toDecimalPlaces(2).toNumber(),
+          projectedEndingBalance: projectedEndingDec.toDecimalPlaces(2).toNumber(),
+          shortfallAmount: projectedEndingDec.abs().toDecimalPlaces(2).toNumber(),
+        });
+      }
+    }
+
+    return {
+      horizonDays: params.horizonDays,
+      startDate: params.todayDate,
+      endDate: forecastEndDate,
+      plannedIncomeTotal: plannedIncomeDec.toDecimalPlaces(2).toNumber(),
+      plannedExpenseTotal: plannedExpenseDec.toDecimalPlaces(2).toNumber(),
+      plannedTransferTotal: plannedTransferDec.toDecimalPlaces(2).toNumber(),
+      projectedNetCashFlow: plannedIncomeDec.minus(plannedExpenseDec).toDecimalPlaces(2).toNumber(),
+      items: upcoming,
+      liquidityAlerts,
     };
   }
 }
