@@ -55,7 +55,6 @@ async function fetchFinancialSummary() {
       const errData = await res.json().catch(() => ({}));
       document.getElementById('kpi-cashflow').textContent = 'EUR --.--';
       document.getElementById('kpi-cashflow-sub').textContent = errData.error || 'Zenmoney connection required';
-      document.getElementById('transactions-body').innerHTML = `<tr><td colspan="5" class="text-center">${errData.error || 'Please connect Zenmoney token to view ledger.'}</td></tr>`;
       return;
     }
     const data = await res.json();
@@ -71,8 +70,6 @@ async function fetchFinancialSummary() {
     document.getElementById('kpi-expenses').textContent = `EUR ${data.totalExpenses.toFixed(2)}`;
     document.getElementById('kpi-tx-count').textContent = `${data.transactionsCount} recorded events`;
     document.getElementById('kpi-liquid').textContent = `EUR ${data.totalLiquidBalance.toFixed(2)}`;
-
-    document.getElementById('ledger-range').textContent = `${data.startDate} to ${data.endDate}`;
 
     // Categories
     const catList = document.getElementById('category-list');
@@ -117,19 +114,6 @@ async function fetchFinancialSummary() {
         plannedList.innerHTML = '<p class="empty-state">No planned transactions in next 30 days.</p>';
       }
     }
-
-    // Transactions Table
-    const tbody = document.getElementById('transactions-body');
-    tbody.innerHTML = data.recentTransactions?.length
-      ? data.recentTransactions.map((tx) => `
-        <tr>
-          <td>${tx.date}</td>
-          <td>${tx.payee || tx.comment || 'Transaction'}</td>
-          <td>${tx.categoryTitle || tx.category || 'General'}</td>
-          <td class="text-right amount-income">${tx.income > 0 ? `+${tx.income.toFixed(2)}` : '-'}</td>
-          <td class="text-right amount-expense">${tx.outcome > 0 ? `-${tx.outcome.toFixed(2)}` : '-'}</td>
-        </tr>`).join('')
-      : '<tr><td colspan="5" class="text-center">No recent transactions recorded.</td></tr>';
   } catch (err) {
     console.error('Error fetching summary:', err);
   }
