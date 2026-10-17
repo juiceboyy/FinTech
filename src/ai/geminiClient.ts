@@ -27,7 +27,7 @@ export class GeminiService {
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
-        systemInstruction: systemInstruction || 'You are an elite quantitative financial analyst providing crisp, high-density financial health audits. Strictly avoid emojis and em-dashes.',
+        systemInstruction: systemInstruction || 'You are a clear, friendly personal financial coach. Explain financial metrics in plain, everyday English that anyone can easily understand, without technical jargon, emojis, or em-dashes.',
         temperature: 0.0,
       },
     });
