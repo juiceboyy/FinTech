@@ -119,29 +119,32 @@ Account Safety Alerts (Upcoming Shortfalls):
 ${liquidityAlertsBreakdown}
 
 Guidelines for Writing This Report:
-- Write for a financial beginner. Use simple, conversational, yet professional everyday language. Avoid jargon like "portfolio velocity", "discretionary vector", "gross outlays", "tactical directives", or "capital allocation".
-- Explain what the numbers actually mean in plain words (e.g., "You brought in EUR X and spent EUR Y, leaving EUR Z in your pocket").
+- Write for a financial beginner. Use plain, conversational, and direct everyday English. Avoid institutional jargon like "portfolio velocity", "discretionary vector", "gross outlays", "tactical directives", or "capital allocation".
+- Maintain a stern, direct, and uncompromising advisory stance. Do not sugarcoat leaks or offer soft excuses.
+- Scrutinize lifestyle leaks: specifically target discretionary spending on eating out, restaurants, cafes, matcha runs, coffees, takeout, bars, and impulse tech/shopping. Give blunt, practical orders to cut back or eliminate unnecessary indulgences.
+- Even if the net cash flow is positive, remind the user that being in the green is not a free pass for lifestyle creep or wasting money on dining out and daily matcha lattes when their safety cushion could be stronger.
+- Explain what the numbers mean in plain words (e.g., "You brought in EUR X and spent EUR Y, leaving EUR Z in your pocket").
 - Moving money between your own accounts (such as checking to savings buffer or paying your credit card) is NOT spending; it builds your savings cushion.
 - When reviewing larger purchases, distinguish fixed essentials (like rent or car lease) from one-off or shopping expenses.
 - If an account has upcoming scheduled bills that exceed its balance, clearly explain which account needs money transferred into it and by how much.
-- Provide simple, practical, actionable next steps.
+- Under Tactical Directives, provide a numbered list of strict, unambiguous rules to follow over the next 15 days, explicitly targeting discretionary lifestyle leaks like dining out and daily cafes or matcha.
 
 Format the report using clean Markdown with these exact sections:
 1. ### Executive Cash Flow Assessment (Money In vs. Out)
 2. ### Savings Rate & Liquidity Benchmark (Savings & Safety Cushion)
 3. ### Category Velocity & Budget Analysis (Where Your Money Went)
 4. ### Anomaly & Outlier Identification (Larger Purchases)
-5. ### Tactical Directives for the Next 15 Days (Simple Action Plan)
+5. ### Tactical Directives for the Next 15 Days (Stern Action Plan)
 
 Formatting constraints:
 - Do NOT use any emojis.
 - Do NOT use em-dashes (do not use '—'; use standard hyphens ' - ' or commas instead).
-- Keep it encouraging, crystal clear, and easy to read.
+- Be direct, disciplined, and crystal clear.
 `;
 
     return geminiService.generateContent(
       prompt,
-      'You are a clear, friendly personal financial coach. Explain financial metrics in plain, everyday English that anyone can easily understand, without technical jargon, emojis, or em-dashes.'
+      'You are a stern, no-nonsense personal financial advisor. Speak in clear, plain English without Wall Street jargon, but be candid, direct, and uncompromising about financial discipline. Call out lifestyle leaks like eating out, matcha and coffee runs, takeout, and impulse buys bluntly. Strictly avoid emojis and em-dashes.'
     );
   }
 
@@ -159,8 +162,8 @@ Formatting constraints:
 
     const isPositiveFlow = netFlowDec.greaterThanOrEqualTo(0);
     const flowAssessment = isPositiveFlow
-      ? `You had a positive cash flow of EUR ${netFlowDec.toFixed(2)}, which means you earned more than you spent over these 15 days. You are keeping more money in your pocket.`
-      : `You spent EUR ${netFlowDec.abs().toFixed(2)} more than you brought in during these 15 days. That happens sometimes, but keep an eye on extra spending so you do not dip too far into savings.`;
+      ? `You had a positive cash flow of EUR ${netFlowDec.toFixed(2)}, earning more than you spent over these 15 days. While you are in the green, do not become complacent: staying positive is not an excuse for lifestyle creep or casual spending leaks on daily matcha lattes and dining out.`
+      : `You spent EUR ${netFlowDec.abs().toFixed(2)} more than you brought in over these 15 days. Running a deficit is unsustainable and drains your hard-earned reserves. Immediate cutbacks on discretionary spending are required to stop the bleeding.`;
 
     const forwardOutlook = planned
       ? `Looking ahead at the next ${planned.horizonDays || 30} days, you have +EUR ${plannedIncDec.toFixed(2)} in expected income and -EUR ${plannedExpDec.toFixed(2)} in scheduled bills and expenses (expected balance change: EUR ${plannedNetDec.toFixed(2)}).`
@@ -169,6 +172,17 @@ Formatting constraints:
     const topCategory = summary.categoryBreakdown[0]
       ? `${summary.categoryBreakdown[0].category} (EUR ${new Decimal(summary.categoryBreakdown[0].amount).toFixed(2)}, or ${new Decimal(summary.categoryBreakdown[0].percentage).toFixed(1)}% of your total spending)`
       : 'None recorded';
+
+    const diningKeywords = ['dining', 'restaurant', 'cafe', 'café', 'coffee', 'matcha', 'food', 'eating', 'bar', 'takeout', 'bakery'];
+    const diningCategory = summary.categoryBreakdown.find((c) =>
+      diningKeywords.some((k) => c.category.toLowerCase().includes(k))
+    );
+
+    const nonEssentialShopping = summary.categoryBreakdown.find((c) =>
+      ['gadget', 'hardware', 'electronic', 'shopping', 'entertainment', 'leisure', 'clothing', 'hobby'].some((k) =>
+        c.category.toLowerCase().includes(k)
+      )
+    );
 
     const savingsTransferSummary =
       summary.internalTransfers && summary.internalTransfers.length > 0
@@ -195,12 +209,32 @@ Formatting constraints:
 
     const shortfallDirective =
       planned && planned.liquidityAlerts.length > 0
-        ? `Transfer at least EUR ${new Decimal(planned.liquidityAlerts[0].shortfallAmount).toFixed(2)} into your ${planned.liquidityAlerts[0].accountTitle} account. It currently has EUR ${new Decimal(planned.liquidityAlerts[0].currentBalance).toFixed(2)}, but EUR ${new Decimal(planned.liquidityAlerts[0].plannedOutflows).toFixed(2)} in scheduled bills are coming up.`
-        : `Aim to keep an emergency cushion of around EUR ${totalExpDec.times(3).toFixed(2)} (roughly three months of basic living costs) for peace of mind.`;
+        ? `Transfer at least EUR ${new Decimal(planned.liquidityAlerts[0].shortfallAmount).toFixed(2)} into your ${planned.liquidityAlerts[0].accountTitle} account immediately. It currently has EUR ${new Decimal(planned.liquidityAlerts[0].currentBalance).toFixed(2)}, but EUR ${new Decimal(planned.liquidityAlerts[0].plannedOutflows).toFixed(2)} in scheduled bills are coming up.`
+        : `Keep an emergency cushion of at least EUR ${totalExpDec.times(3).toFixed(2)} (three months of basic living costs) strictly untouched for peace of mind.`;
 
     const savingsComparison = savingsRateDec.greaterThanOrEqualTo(20)
-      ? `Great job! Your savings rate of ${savingsRateDec.toFixed(1)}% meets or exceeds the common 20% savings rule of thumb (from the 50/30/20 guideline).`
-      : `Your savings rate is ${savingsRateDec.toFixed(1)}%. Financial guidelines like the 50/30/20 rule suggest aiming for 20% into savings or buffer when possible.`;
+      ? `Your savings rate of ${savingsRateDec.toFixed(1)}% clears the 20% rule of thumb, but keep pushing: every euro saved now compounds into real freedom later.`
+      : `Your savings rate of ${savingsRateDec.toFixed(1)}% is below the recommended 20% benchmark. You must trim non-essential spending to build an adequate reserve.`;
+
+    const lifestyleWarning = diningCategory
+      ? `Stern advisory on lifestyle leaks: You spent EUR ${new Decimal(diningCategory.amount).toFixed(2)} on ${diningCategory.category}. Frequent dining out, matcha runs, and cafe visits silently drain your surplus. Treat these as rare rewards, not everyday routines.`
+      : 'Stern advisory on lifestyle leaks: Keep everyday conveniences, takeout, and coffee runs strictly in check. Small daily indulgences compound into major budget leaks.';
+
+    const directives: string[] = [];
+    if (diningCategory) {
+      directives.push(`Slash spending on ${diningCategory.category} (EUR ${new Decimal(diningCategory.amount).toFixed(2)} spent): Cut down on eating out, cafe stops, matcha, and takeout. Cook at home and brew your own drinks until your savings rate and emergency cushion are rock-solid.`);
+    } else {
+      directives.push('Cap dining and cafe spending: Eliminate takeout, restaurant dinners, and cafe runs over the next two weeks to retain your hard-earned cash.');
+    }
+
+    if (nonEssentialShopping) {
+      directives.push(`Freeze non-essential purchases in ${nonEssentialShopping.category} (EUR ${new Decimal(nonEssentialShopping.amount).toFixed(2)}): Postpone gadgets, electronics, or impulse buys until your emergency fund target is fully met.`);
+    }
+
+    directives.push(shortfallDirective);
+    if (planned && planned.items.length > 0) {
+      directives.push(`Upcoming bills and scheduled transfers to protect against:\n${plannedListText}`);
+    }
 
     return `### Executive Cash Flow Assessment (Money In vs. Out)
 ${flowAssessment}
@@ -229,16 +263,16 @@ ${savingsComparison} Remember that moving money into your buffer or savings acco
 Top spending categories:
 ${summary.categoryBreakdown.slice(0, 5).map((c) => `- ${c.category}: EUR ${new Decimal(c.amount).toFixed(2)} (${new Decimal(c.percentage).toFixed(1)}% of total spending)`).join('\n')}
 
+${lifestyleWarning}
+
 ### Anomaly & Outlier Identification (Larger Purchases)
 Here are your larger expenses of EUR 250 or more during this 15-day period, so you can easily review them:
 ${anomalyText}
 
-### Tactical Directives for the Next 15 Days (Simple Action Plan)
-1. Keep an eye on ${summary.categoryBreakdown[0]?.category || 'everyday spending'} to keep your cash flow healthy.
-2. ${shortfallDirective}
-3. Upcoming bills and transfers to keep on your radar:
-${plannedListText}`;
+### Tactical Directives for the Next 15 Days (Stern Action Plan)
+${directives.map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
   }
+
 }
 
 export const healthCheckAnalyzer = new HealthCheckAnalyzer();
