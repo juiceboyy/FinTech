@@ -206,5 +206,50 @@ export function generateMockFinancialData(): ZenmoneySyncData {
     },
   ];
 
-  return { accounts, transactions, budgets, serverTimestamp: Date.now() };
+  const formatFutureDate = (daysAhead: number) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() + daysAhead);
+    return d.toISOString().split('T')[0];
+  };
+
+  const plannedTransactions = [
+    {
+      id: 'plan-01',
+      date: formatFutureDate(5),
+      income: 452.35,
+      outcome: 0,
+      incomeAccount: 'acc-main-checking',
+      incomeAccountTitle: 'Main Checking Account',
+      outcomeAccount: 'acc-main-checking',
+      outcomeAccountTitle: 'Main Checking Account',
+      isTransfer: false,
+      state: 'planned' as const,
+      isForecast: true,
+      category: 'Freelance',
+      categoryTitle: 'Consulting & Freelance',
+      payee: 'Design Studio LLC',
+      comment: 'Scheduled retainer invoice',
+      currency: 'EUR',
+    },
+    {
+      id: 'plan-02',
+      date: formatFutureDate(10),
+      income: 0,
+      outcome: 84.00,
+      incomeAccount: 'acc-main-checking',
+      incomeAccountTitle: 'Main Checking Account',
+      outcomeAccount: 'acc-main-checking',
+      outcomeAccountTitle: 'Main Checking Account',
+      isTransfer: false,
+      state: 'planned' as const,
+      isForecast: true,
+      category: 'Tax',
+      categoryTitle: 'Tax',
+      payee: 'BELASTINGDIENST',
+      comment: 'Monthly tax installment',
+      currency: 'EUR',
+    },
+  ];
+
+  return { accounts, transactions, plannedTransactions, budgets, serverTimestamp: Date.now() };
 }

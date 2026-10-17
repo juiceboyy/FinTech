@@ -25,6 +25,7 @@ export class FinanceController {
       return FinancialDataNormalizer.normalize({
         accounts: liveSync.accounts,
         transactions: liveSync.transactions,
+        plannedTransactions: liveSync.plannedTransactions,
         budgets: liveSync.budgets,
         periodDays,
         sourceMode: 'live',

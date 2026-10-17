@@ -6,6 +6,7 @@
   <title>Zenmoney Financial Health &amp; Intelligence</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/components.css">
+  <link rel="stylesheet" href="/importer.css">
 </head>
 <body>
   <div class="container">
@@ -102,10 +103,25 @@
           </div>
         </section>
 
+        <!-- Planned Schedule (30-Day Forecast) -->
+        <section class="panel">
+          <div class="panel-header">
+            <h3>30-Day Planned Schedule</h3>
+          </div>
+          <div class="anomaly-list" id="planned-list">
+            <p class="empty-state">Loading planned transactions...</p>
+          </div>
+        </section>
+
         <!-- Archived Reports -->
         <section class="panel">
           <div class="panel-header">
             <h3>Report History</h3>
+            <div class="history-actions">
+              <button type="button" id="export-reports-btn" class="btn-text-action" title="Export archived reports as JSON backup">Export</button>
+              <button type="button" id="import-reports-btn" class="btn-text-action" title="Import archived reports from JSON backup">Import</button>
+              <input type="file" id="import-reports-file-input" accept=".json,application/json" class="sr-only">
+            </div>
           </div>
           <div class="history-list" id="history-list">
             <p class="empty-state">No archived reports yet.</p>
@@ -169,32 +185,6 @@
       </div>
     </section>
 
-    <!-- Recent Transactions Table -->
-    <section class="panel transactions-section">
-      <div class="panel-header">
-        <h3>15-Day Transaction Ledger</h3>
-        <span class="panel-meta" id="ledger-range">Current Window</span>
-      </div>
-      <div class="table-container">
-        <table class="ledger-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Payee / Description</th>
-              <th>Category</th>
-              <th class="text-right">Income</th>
-              <th class="text-right">Expense</th>
-            </tr>
-          </thead>
-          <tbody id="transactions-body">
-            <tr>
-              <td colspan="5" class="text-center">Loading transactions...</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
     <!-- Footer -->
     <footer class="editorial-footer">
       <span>Zenmoney Remote MCP Integration (api.zenmoney.app/mcp)</span>
@@ -202,6 +192,8 @@
     </footer>
   </div>
 
+  <script src="/reportStore.js"></script>
+  <script src="/reportUi.js"></script>
   <script src="/app.js"></script>
   <script src="/importerUtils.js"></script>
   <script src="/importer.js"></script>

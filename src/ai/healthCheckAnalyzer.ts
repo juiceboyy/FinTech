@@ -22,7 +22,7 @@ export class HealthCheckAnalyzer {
       generatedBy = 'local-rule-engine (add GEMINI_API_KEY for neural analysis)';
     }
 
-    return reportStorage.saveReport({
+    return await reportStorage.saveReport({
       summary,
       markdownContent,
       generatedBy,
@@ -48,6 +48,34 @@ export class HealthCheckAnalyzer {
             .join('\n')
         : 'None recorded in this period.';
 
+    const planned = summary.plannedSchedule;
+    const plannedItemsBreakdown =
+      planned && planned.items.length > 0
+        ? planned.items
+            .map((pt) => {
+              const incDec = new Decimal(pt.income || 0);
+              const outDec = new Decimal(pt.outcome || 0);
+              const flowLabel = pt.isTransfer
+                ? `TRANSFER EUR ${outDec.greaterThan(0) ? outDec.toFixed(2) : incDec.toFixed(2)} (${pt.outcomeAccountTitle || 'Source'} -> ${pt.incomeAccountTitle || 'Target'})`
+                : incDec.greaterThan(0)
+                  ? `INCOME +EUR ${incDec.toFixed(2)} (into ${pt.incomeAccountTitle || 'Account'})`
+                  : `EXPENSE -EUR ${outDec.toFixed(2)} (from ${pt.outcomeAccountTitle || 'Account'})`;
+              const cleanNote = pt.comment ? ` | Note: ${pt.comment.replace(/<br\s*\/?>/gi, ', ').trim()}` : '';
+              return `- ${pt.date} | ${flowLabel} | ${pt.payee} (${pt.categoryTitle})${cleanNote}`;
+            })
+            .join('\n')
+        : 'No planned transactions scheduled in the upcoming window.';
+
+    const liquidityAlertsBreakdown =
+      planned && planned.liquidityAlerts.length > 0
+        ? planned.liquidityAlerts
+            .map(
+              (al) =>
+                `- ALERT on ${al.accountTitle}: Current Balance EUR ${new Decimal(al.currentBalance).toFixed(2)}, Scheduled Inflows +EUR ${new Decimal(al.plannedInflows).toFixed(2)}, Scheduled Outflows -EUR ${new Decimal(al.plannedOutflows).toFixed(2)} -> Projected Balance EUR ${new Decimal(al.projectedEndingBalance).toFixed(2)} (Shortfall: EUR ${new Decimal(al.shortfallAmount).toFixed(2)})`
+            )
+            .join('\n')
+        : 'All accounts have sufficient balance to cover scheduled outflows.';
+
     const anomaliesBreakdown =
       summary.topAnomalies.length > 0
         ? summary.topAnomalies
@@ -56,9 +84,9 @@ export class HealthCheckAnalyzer {
         : 'None detected.';
 
     const prompt = `
-Generate a structured 15-day financial health audit based on the following verified financial metrics:
+Generate a structured 15-day financial health audit and forward cash flow assessment based on the following verified financial metrics:
 
-Financial Context (${summary.startDate} to ${summary.endDate}, ${summary.periodDays} days):
+Historical 15-Day Context (${summary.startDate} to ${summary.endDate}, ${summary.periodDays} days):
 - Total External Income: EUR ${new Decimal(summary.totalIncome).toFixed(2)}
 - Total External Expenses: EUR ${new Decimal(summary.totalExpenses).toFixed(2)}
 - Net Cash Flow: EUR ${new Decimal(summary.netCashFlow).toFixed(2)}
@@ -80,10 +108,21 @@ ${summary.categoryBreakdown.map((c) => `- ${c.category}: EUR ${new Decimal(c.amo
 Detected High-Value External Expenditures (>= EUR 250):
 ${anomaliesBreakdown}
 
+Forward ${planned?.horizonDays || 30}-Day Planned Schedule (${planned?.startDate || summary.endDate} to ${planned?.endDate || summary.endDate}):
+- Scheduled External Income: +EUR ${new Decimal(planned?.plannedIncomeTotal || 0).toFixed(2)}
+- Scheduled External Expenses: -EUR ${new Decimal(planned?.plannedExpenseTotal || 0).toFixed(2)}
+- Scheduled Internal Transfers: EUR ${new Decimal(planned?.plannedTransferTotal || 0).toFixed(2)}
+- Projected Forward Net Cash Flow: EUR ${new Decimal(planned?.projectedNetCashFlow || 0).toFixed(2)}
+${plannedItemsBreakdown}
+
+Account Liquidity vs. Planned Outflow Alerts:
+${liquidityAlertsBreakdown}
+
 Domain Rules & Analytical Guidance:
 - Internal transfers between the user's own accounts (such as Privé -> Buffer savings allocations or Privé -> ING Creditcard settlements) are NOT expenses and have already been excluded from Total External Expenses and Anomalies.
 - Explicitly acknowledge transfers into Buffer or savings accounts as disciplined capital allocation and reserve building within the Savings Rate & Liquidity Benchmark section.
 - When evaluating high-value expenditures, distinguish fixed contractual obligations (such as lease car payments, rent, or household bills noted in transaction comments) from discretionary spending outliers.
+- Incorporate the Forward Planned Schedule and any Account Liquidity Alerts into your Executive Cash Flow Assessment and Tactical Directives (for example, highlighting upcoming scheduled income, tax/subscription payments, and any account that requires a top-up before a scheduled debit).
 
 Format the report using clean Markdown with these exact sections:
 1. ### Executive Cash Flow Assessment
@@ -111,6 +150,10 @@ Formatting constraints:
     const savingsRateDec = new Decimal(summary.savingsRatePercentage);
     const liquidDec = new Decimal(summary.totalLiquidBalance);
     const savingsAllocDec = new Decimal(summary.savingsTransfersTotal || 0);
+    const planned = summary.plannedSchedule;
+    const plannedIncDec = new Decimal(planned?.plannedIncomeTotal || 0);
+    const plannedExpDec = new Decimal(planned?.plannedExpenseTotal || 0);
+    const plannedNetDec = new Decimal(planned?.projectedNetCashFlow || 0);
 
     const isPositiveFlow = netFlowDec.greaterThanOrEqualTo(0);
     const flowAssessment = isPositiveFlow
@@ -132,10 +175,25 @@ Formatting constraints:
       ? summary.topAnomalies.map((a) => `- ${a.date}: EUR ${new Decimal(a.amount).toFixed(2)} at ${a.payee} (${a.category}) - ${a.reason}`).join('\n')
       : 'No external transactions met or exceeded the outlier threshold of EUR 250.';
 
-    const emergencyReserveTarget = totalExpDec.times(3).toFixed(2);
+    const plannedListText =
+      planned && planned.items.length > 0
+        ? planned.items
+            .slice(0, 6)
+            .map((pt) => {
+              const amt = new Decimal(pt.outcome > 0 ? pt.outcome : pt.income).toFixed(2);
+              const kind = pt.isTransfer ? 'Transfer' : pt.income > 0 ? 'Planned Income' : 'Planned Expense';
+              return `- ${pt.date}: ${kind} of EUR ${amt} - ${pt.payee} (${pt.categoryTitle})`;
+            })
+            .join('\n')
+        : '- No upcoming planned transactions scheduled in Zenmoney.';
+
+    const shortfallDirective =
+      planned && planned.liquidityAlerts.length > 0
+        ? `Fund ${planned.liquidityAlerts[0].accountTitle} with at least EUR ${new Decimal(planned.liquidityAlerts[0].shortfallAmount).toFixed(2)} prior to scheduled outflows (current balance EUR ${new Decimal(planned.liquidityAlerts[0].currentBalance).toFixed(2)} vs. EUR ${new Decimal(planned.liquidityAlerts[0].plannedOutflows).toFixed(2)} scheduled debits).`
+        : `Maintain emergency cash reserves at or above EUR ${totalExpDec.times(3).toFixed(2)} to cover three months of basic operational expenses.`;
 
     return `### Executive Cash Flow Assessment
-${flowAssessment} Total external revenue stood at EUR ${totalIncDec.toFixed(2)} against gross external outlays of EUR ${totalExpDec.toFixed(2)} across ${summary.transactionsCount} recorded events.
+${flowAssessment} Total external revenue stood at EUR ${totalIncDec.toFixed(2)} against gross external outlays of EUR ${totalExpDec.toFixed(2)} across ${summary.transactionsCount} recorded events. Looking ahead ${planned?.horizonDays || 30} days, scheduled inflows total EUR ${plannedIncDec.toFixed(2)} against scheduled outflows of EUR ${plannedExpDec.toFixed(2)} (projected net flow: EUR ${plannedNetDec.toFixed(2)}).
 
 ### Savings Rate & Liquidity Benchmark
 - Observed Cash Flow Savings Rate: ${savingsRateDec.toFixed(1)}%
@@ -155,8 +213,9 @@ ${anomalyText}
 
 ### Tactical Directives for the Next 15 Days
 1. Calibrate discretionary outlays in ${summary.categoryBreakdown[0]?.category || 'high-volume categories'} to maintain net positive liquidity.
-2. Maintain emergency cash reserves at or above EUR ${emergencyReserveTarget} to cover three months of basic operational expenses.
-3. Review auto-renewing subscriptions and non-essential merchant charges before the upcoming cycle reconciliation.`;
+2. ${shortfallDirective}
+3. Reconcile upcoming scheduled Zenmoney events:
+${plannedListText}`;
   }
 }
 

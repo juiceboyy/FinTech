@@ -73,6 +73,76 @@ test('FinancialDataNormalizer excludes internal savings transfers from expenses 
   assert.strictEqual(summary.internalTransfers[0].isSavingsAllocation, true);
 });
 
+test('FinancialDataNormalizer normalizes planned transactions and detects account liquidity shortfalls', () => {
+  const futureDateObj = new Date();
+  futureDateObj.setDate(futureDateObj.getDate() + 10);
+  const futureDate = futureDateObj.toISOString().split('T')[0];
+
+  const summary = FinancialDataNormalizer.normalize({
+    accounts: [
+      { id: 'acc-bfe', title: 'Big Fish Entertainment', type: 'checking', balance: 57.77, currency: 'EUR' },
+      { id: 'acc-prive', title: 'Privé', type: 'checking', balance: 461.8, currency: 'EUR' },
+      { id: 'acc-buffer', title: 'Buffer', type: 'checking', balance: 1901.82, currency: 'EUR' },
+    ],
+    transactions: [],
+    plannedTransactions: [
+      {
+        id: 'pm-gig',
+        date: futureDate,
+        income: 452.35,
+        outcome: 0,
+        incomeAccount: 'acc-prive',
+        outcomeAccount: 'acc-prive',
+        isTransfer: false,
+        state: 'planned',
+        categoryTitle: 'Salary',
+        payee: 'Hr RJ Elenbaas, Mw S Doreleijers',
+        comment: 'Gig CA Wolvega',
+        currency: 'EUR',
+      },
+      {
+        id: 'pm-lease',
+        date: futureDate,
+        income: 0,
+        outcome: 1100,
+        incomeAccount: 'acc-bfe',
+        outcomeAccount: 'acc-bfe',
+        isTransfer: false,
+        state: 'planned',
+        categoryTitle: 'Auto',
+        payee: 'Mobility Service Nederland B.V.',
+        comment: 'Lease car',
+        currency: 'EUR',
+      },
+      {
+        id: 'pm-tax-transfer',
+        date: futureDate,
+        income: 300,
+        outcome: 300,
+        incomeAccount: 'acc-buffer',
+        outcomeAccount: 'acc-prive',
+        isTransfer: true,
+        state: 'planned',
+        categoryTitle: 'Internal Transfer',
+        payee: 'Transfer: Privé -> Buffer',
+        comment: 'Tax',
+        currency: 'EUR',
+      },
+    ],
+    budgets: [],
+    periodDays: 15,
+    forecastHorizonDays: 30,
+  });
+
+  assert.strictEqual(summary.plannedSchedule.plannedIncomeTotal, 452.35);
+  assert.strictEqual(summary.plannedSchedule.plannedExpenseTotal, 1100);
+  assert.strictEqual(summary.plannedSchedule.plannedTransferTotal, 300);
+  assert.strictEqual(summary.plannedSchedule.projectedNetCashFlow, -647.65);
+  assert.strictEqual(summary.plannedSchedule.liquidityAlerts.length, 1);
+  assert.strictEqual(summary.plannedSchedule.liquidityAlerts[0].accountTitle, 'Big Fish Entertainment');
+  assert.strictEqual(summary.plannedSchedule.liquidityAlerts[0].shortfallAmount, 1042.23);
+});
+
 test('FinanceController enforces live Zenmoney connection requirement', async () => {
   await assert.rejects(
     async () => {
@@ -88,6 +158,7 @@ test('HealthCheckAnalyzer generates structured report and persists it to storage
   const summary = FinancialDataNormalizer.normalize({
     accounts: mock.accounts,
     transactions: mock.transactions,
+    plannedTransactions: mock.plannedTransactions,
     budgets: mock.budgets,
     periodDays: 15,
   });
@@ -97,7 +168,7 @@ test('HealthCheckAnalyzer generates structured report and persists it to storage
   assert.ok(report.markdownContent.includes('### Executive Cash Flow Assessment'), 'Must contain executive section');
   assert.ok(report.markdownContent.includes('### Savings Rate & Liquidity Benchmark'), 'Must contain savings benchmark');
 
-  const retrieved = reportStorage.getReportById(report.id);
+  const retrieved = await reportStorage.getReportById(report.id);
   assert.ok(retrieved !== null, 'Report should be retrievable from disk');
   assert.strictEqual(retrieved?.id, report.id);
 });
