@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "test": "tsx --test test/smoke.test.ts test/importer.test.ts"
+    "test": "tsx --test test/smoke.test.ts test/importer.test.ts test/reportStorage.test.ts"
   },
   "keywords": [
     "zenmoney",
@@ -24,6 +24,7 @@
   "dependencies": {
     "@google/genai": "^2.29.1",
     "@modelcontextprotocol/sdk": "^1.6.1",
+    "@netlify/blobs": "^11.1.4",
     "@netlify/functions": "^6.0.2",
     "decimal.js": "^10.6.0",
     "dotenv": "^16.4.7",

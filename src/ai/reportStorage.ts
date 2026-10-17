@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { NormalizedFinancialSummary } from '../engine/types.js';
+import { blobsAdapter, type ReportMetadata } from './blobsStorage.js';
 
 export interface StoredReport {
   id: string;
@@ -23,6 +24,7 @@ const REPORTS_DIR = isServerless ? path.join('/tmp', 'reports') : path.resolve(p
 export class ReportStorage {
   private inMemoryCache: Map<string, StoredReport> = new Map();
   private latestInMemory: StoredReport | null = null;
+  private hasSeededBlobs = false;
 
   constructor() {
     try {
@@ -30,15 +32,15 @@ export class ReportStorage {
         fs.mkdirSync(REPORTS_DIR, { recursive: true });
       }
     } catch {
-      // Ignore directory creation failure in locked serverless environments
+      // Non-fatal in read-only serverless environments
     }
   }
 
-  public saveReport(params: {
+  public async saveReport(params: {
     summary: NormalizedFinancialSummary;
     markdownContent: string;
     generatedBy: string;
-  }): StoredReport {
+  }): Promise<StoredReport> {
     const id = `report-${Date.now()}`;
     const report: StoredReport = {
       id,
@@ -55,90 +57,163 @@ export class ReportStorage {
       generatedBy: params.generatedBy,
     };
 
-    // Cache in memory
+    // 1. In-memory cache
     this.inMemoryCache.set(id, report);
     this.latestInMemory = report;
 
+    // 2. Filesystem persistence
     try {
       const filePath = path.join(REPORTS_DIR, `${id}.json`);
       const latestPath = path.join(REPORTS_DIR, 'latest.json');
       fs.writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf-8');
       fs.writeFileSync(latestPath, JSON.stringify(report, null, 2), 'utf-8');
     } catch {
-      // In-memory cache ensures accessibility even if disk is read-only
+      // In-memory ensures accessibility even if filesystem is read-only
     }
+
+    // 3. Netlify Blobs cloud persistence (survives app updates & deploy cycles)
+    await blobsAdapter.saveReport(report);
 
     return report;
   }
 
-  public getLatestReport(): StoredReport | null {
+  public async getLatestReport(): Promise<StoredReport | null> {
     if (this.latestInMemory) {
       return this.latestInMemory;
     }
+
+    // Check Netlify Blobs
+    const fromBlobs = await blobsAdapter.getLatestReport();
+    if (fromBlobs) {
+      this.latestInMemory = fromBlobs;
+      this.inMemoryCache.set(fromBlobs.id, fromBlobs);
+      return fromBlobs;
+    }
+
+    // Check local filesystem
     const latestPath = path.join(REPORTS_DIR, 'latest.json');
-    if (!fs.existsSync(latestPath)) {
-      return null;
+    if (fs.existsSync(latestPath)) {
+      try {
+        const raw = fs.readFileSync(latestPath, 'utf-8');
+        const parsed: StoredReport = JSON.parse(raw);
+        this.latestInMemory = parsed;
+        this.inMemoryCache.set(parsed.id, parsed);
+        return parsed;
+      } catch {
+        // ignore invalid file
+      }
     }
-    try {
-      const raw = fs.readFileSync(latestPath, 'utf-8');
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
+
+    return null;
   }
 
-  public listReports(): Array<Omit<StoredReport, 'markdownContent'>> {
-    const results: Array<Omit<StoredReport, 'markdownContent'>> = [];
+  public async listReports(): Promise<ReportMetadata[]> {
+    const reportMap = new Map<string, ReportMetadata>();
 
-    // From memory cache
-    for (const report of Array.from(this.inMemoryCache.values()).reverse()) {
+    // 1. In-memory cache entries
+    for (const report of Array.from(this.inMemoryCache.values())) {
       const { markdownContent, ...meta } = report;
-      results.push(meta);
+      reportMap.set(meta.id, meta);
     }
 
-    // From disk if not already in results
+    // 2. Netlify Blobs cloud entries
+    const blobsReports = await blobsAdapter.listReports();
+    for (const r of blobsReports) {
+      if (!reportMap.has(r.id)) {
+        reportMap.set(r.id, r);
+      }
+    }
+
+    // 3. Local filesystem entries
     if (fs.existsSync(REPORTS_DIR)) {
       try {
-        const files = fs.readdirSync(REPORTS_DIR)
+        const files = fs
+          .readdirSync(REPORTS_DIR)
           .filter((f) => f.startsWith('report-') && f.endsWith('.json'))
           .sort()
           .reverse();
 
-        for (const f of files.slice(0, 20)) {
-          try {
-            const raw = fs.readFileSync(path.join(REPORTS_DIR, f), 'utf-8');
-            const parsed: StoredReport = JSON.parse(raw);
-            if (!results.some((r) => r.id === parsed.id)) {
+        for (const f of files.slice(0, 30)) {
+          const reportId = f.replace('.json', '');
+          if (!reportMap.has(reportId)) {
+            try {
+              const raw = fs.readFileSync(path.join(REPORTS_DIR, f), 'utf-8');
+              const parsed: StoredReport = JSON.parse(raw);
               const { markdownContent, ...meta } = parsed;
-              results.push(meta);
+              reportMap.set(meta.id, meta);
+
+              // Auto-seed to Blobs if Blobs is available and this item wasn't in Blobs
+              if (blobsAdapter.isAvailable() && !this.hasSeededBlobs) {
+                blobsAdapter.saveReport(parsed).catch(() => {});
+              }
+            } catch {
+              // ignore invalid file
             }
-          } catch {
-            // ignore broken file
           }
         }
+        this.hasSeededBlobs = true;
       } catch {
-        // ignore disk listing failure
+        // ignore filesystem read error
       }
     }
 
+    const results = Array.from(reportMap.values());
+    results.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     return results;
   }
 
-  public getReportById(id: string): StoredReport | null {
+  public async getReportById(id: string): Promise<StoredReport | null> {
     if (this.inMemoryCache.has(id)) {
       return this.inMemoryCache.get(id) || null;
     }
+
+    // Check Netlify Blobs
+    const fromBlobs = await blobsAdapter.getReportById(id);
+    if (fromBlobs) {
+      this.inMemoryCache.set(fromBlobs.id, fromBlobs);
+      return fromBlobs;
+    }
+
+    // Check local filesystem
     const safeId = path.basename(id);
     const target = path.join(REPORTS_DIR, `${safeId}.json`);
-    if (!fs.existsSync(target)) {
-      return null;
+    if (fs.existsSync(target)) {
+      try {
+        const raw = fs.readFileSync(target, 'utf-8');
+        const parsed: StoredReport = JSON.parse(raw);
+        this.inMemoryCache.set(parsed.id, parsed);
+        return parsed;
+      } catch {
+        return null;
+      }
     }
-    try {
-      const raw = fs.readFileSync(target, 'utf-8');
-      return JSON.parse(raw);
-    } catch {
-      return null;
+
+    return null;
+  }
+
+  public async reconcileReports(reports: StoredReport[]): Promise<ReportMetadata[]> {
+    for (const report of reports) {
+      if (!report || !report.id || !report.markdownContent) continue;
+
+      if (!this.inMemoryCache.has(report.id)) {
+        this.inMemoryCache.set(report.id, report);
+      }
+
+      // Persist to disk if not exists
+      try {
+        const filePath = path.join(REPORTS_DIR, `${report.id}.json`);
+        if (!fs.existsSync(filePath)) {
+          fs.writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf-8');
+        }
+      } catch {
+        // ignore disk error
+      }
+
+      // Persist to Netlify Blobs
+      await blobsAdapter.saveReport(report);
     }
+
+    return this.listReports();
   }
 }
 

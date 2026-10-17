@@ -168,7 +168,7 @@ test('HealthCheckAnalyzer generates structured report and persists it to storage
   assert.ok(report.markdownContent.includes('### Executive Cash Flow Assessment'), 'Must contain executive section');
   assert.ok(report.markdownContent.includes('### Savings Rate & Liquidity Benchmark'), 'Must contain savings benchmark');
 
-  const retrieved = reportStorage.getReportById(report.id);
+  const retrieved = await reportStorage.getReportById(report.id);
   assert.ok(retrieved !== null, 'Report should be retrievable from disk');
   assert.strictEqual(retrieved?.id, report.id);
 });

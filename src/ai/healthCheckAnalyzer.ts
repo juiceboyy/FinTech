@@ -22,7 +22,7 @@ export class HealthCheckAnalyzer {
       generatedBy = 'local-rule-engine (add GEMINI_API_KEY for neural analysis)';
     }
 
-    return reportStorage.saveReport({
+    return await reportStorage.saveReport({
       summary,
       markdownContent,
       generatedBy,

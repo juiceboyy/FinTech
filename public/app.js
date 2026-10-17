@@ -1,25 +1,8 @@
-function renderMarkdown(md) {
-  if (!md) return '<p class="empty-state">No report content.</p>';
-  let html = md
-    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-    .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
-    .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-    .replace(/\*(.*)\*/gim, '<em>$1</em>')
-    .replace(/^\- (.*$)/gim, '<li>$1</li>')
-    .replace(/^\d+\. (.*$)/gim, '<li>$1</li>')
-    .replace(/\n\n+/g, '<p></p>');
-
-  html = html.replace(/(<li>.*<\/li>)/gis, '<ul>$1</ul>');
-  return html;
-}
-
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
     const data = await res.json();
-    
+
     const mcpPill = document.getElementById('mcp-pill');
     const authBanner = document.getElementById('auth-banner');
     if (data.mcp.connected) {
@@ -74,21 +57,30 @@ async function fetchFinancialSummary() {
     // Categories
     const catList = document.getElementById('category-list');
     catList.innerHTML = data.categoryBreakdown?.length
-      ? data.categoryBreakdown.slice(0, 6).map((c) => `
+      ? data.categoryBreakdown
+          .slice(0, 6)
+          .map(
+            (c) => `
         <div class="category-item">
           <span class="category-name">${c.category}</span>
           <span class="category-stats">EUR ${c.amount.toFixed(2)} (${c.percentage.toFixed(1)}%)</span>
-        </div>`).join('')
+        </div>`
+          )
+          .join('')
       : '<p class="empty-state">No category expenditures in range.</p>';
 
     // Anomalies
     const anomalyList = document.getElementById('anomaly-list');
     anomalyList.innerHTML = data.topAnomalies?.length
-      ? data.topAnomalies.map((a) => `
+      ? data.topAnomalies
+          .map(
+            (a) => `
         <div class="anomaly-item">
           <div class="anomaly-title"><span>${a.payee}</span><span>EUR ${a.amount.toFixed(2)}</span></div>
           <div class="anomaly-desc">${a.date} - ${a.reason}</div>
-        </div>`).join('')
+        </div>`
+          )
+          .join('')
       : '<p class="empty-state">No transaction anomalies detected.</p>';
 
     // Planned Schedule
@@ -97,18 +89,25 @@ async function fetchFinancialSummary() {
       const items = data.plannedSchedule?.items || [];
       const alerts = data.plannedSchedule?.liquidityAlerts || [];
       if (items.length > 0 || alerts.length > 0) {
-        const alertHtml = alerts.map((al) => `
+        const alertHtml = alerts
+          .map(
+            (al) => `
           <div class="anomaly-item">
             <div class="anomaly-title"><span>Shortfall: ${al.accountTitle}</span><span class="amount-expense">-EUR ${al.shortfallAmount.toFixed(2)}</span></div>
             <div class="anomaly-desc">Balance EUR ${al.currentBalance.toFixed(2)} vs EUR ${al.plannedOutflows.toFixed(2)} scheduled debits</div>
-          </div>`).join('');
-        const itemsHtml = items.slice(0, 8).map((pt) => {
-          const isInc = !pt.isTransfer && pt.income > 0;
-          const amt = (pt.outcome > 0 ? pt.outcome : pt.income).toFixed(2);
-          const sign = pt.isTransfer ? '' : isInc ? '+' : '-';
-          const cls = pt.isTransfer ? '' : isInc ? 'amount-income' : 'amount-expense';
-          return `<div class="category-item"><span class="category-name">${pt.date} - ${pt.payee}</span><span class="category-stats ${cls}">${sign}EUR ${amt}</span></div>`;
-        }).join('');
+          </div>`
+          )
+          .join('');
+        const itemsHtml = items
+          .slice(0, 8)
+          .map((pt) => {
+            const isInc = !pt.isTransfer && pt.income > 0;
+            const amt = (pt.outcome > 0 ? pt.outcome : pt.income).toFixed(2);
+            const sign = pt.isTransfer ? '' : isInc ? '+' : '-';
+            const cls = pt.isTransfer ? '' : isInc ? 'amount-income' : 'amount-expense';
+            return `<div class="category-item"><span class="category-name">${pt.date} - ${pt.payee}</span><span class="category-stats ${cls}">${sign}EUR ${amt}</span></div>`;
+          })
+          .join('');
         plannedList.innerHTML = alertHtml + itemsHtml;
       } else {
         plannedList.innerHTML = '<p class="empty-state">No planned transactions in next 30 days.</p>';
@@ -116,57 +115,6 @@ async function fetchFinancialSummary() {
     }
   } catch (err) {
     console.error('Error fetching summary:', err);
-  }
-}
-
-async function fetchLatestReport() {
-  try {
-    const res = await fetch('/api/reports/latest');
-    if (!res.ok) {
-      document.getElementById('report-container').innerHTML = '<p class="empty-state">No report generated yet. Click "Run Health Check Now" to produce your initial audit.</p>';
-      return;
-    }
-    const report = await res.json();
-    renderReport(report);
-  } catch (err) {
-    console.error('Error fetching latest report:', err);
-  }
-}
-
-function renderReport(report) {
-  document.getElementById('report-timestamp').textContent = new Date(report.createdAt).toLocaleString();
-  document.getElementById('report-source-tag').textContent = `Engine: ${report.generatedBy}`;
-  document.getElementById('report-container').innerHTML = renderMarkdown(report.markdownContent);
-}
-
-async function fetchHistory() {
-  try {
-    const res = await fetch('/api/reports');
-    const reports = await res.json();
-    const list = document.getElementById('history-list');
-    if (!reports || reports.length === 0) {
-      list.innerHTML = '<p class="empty-state">No past reports archived.</p>';
-      return;
-    }
-    list.innerHTML = reports.map((r) => `
-      <div class="history-item" data-id="${r.id}">
-        <span>${new Date(r.createdAt).toLocaleDateString()}</span>
-        <span>Flow: EUR ${r.netCashFlow.toFixed(2)}</span>
-      </div>
-    `).join('');
-
-    list.querySelectorAll('.history-item').forEach((item) => {
-      item.addEventListener('click', async () => {
-        const id = item.getAttribute('data-id');
-        const detailRes = await fetch(`/api/reports/${id}`);
-        if (detailRes.ok) {
-          const detail = await detailRes.json();
-          renderReport(detail);
-        }
-      });
-    });
-  } catch (err) {
-    console.error('Error fetching history:', err);
   }
 }
 
@@ -179,9 +127,14 @@ async function triggerHealthCheck() {
     const res = await fetch('/api/trigger-analysis', { method: 'POST' });
     const data = await res.json();
     if (data.success && data.report) {
-      renderReport(data.report);
+      if (window.ReportStore) {
+        await window.ReportStore.saveReport(data.report);
+      }
+      if (window.ReportUI) {
+        window.ReportUI.renderReport(data.report);
+        await window.ReportUI.fetchHistory();
+      }
       await fetchFinancialSummary();
-      await fetchHistory();
       await fetchStatus();
     }
   } catch (err) {
@@ -241,8 +194,12 @@ async function connectToken() {
 function init() {
   fetchStatus();
   fetchFinancialSummary();
-  fetchLatestReport();
-  fetchHistory();
+
+  if (window.ReportUI) {
+    window.ReportUI.fetchLatestReport();
+    window.ReportUI.fetchHistory();
+    window.ReportUI.initReportActions();
+  }
 
   const auditBtn = document.getElementById('run-audit-btn');
   if (auditBtn) {
@@ -261,4 +218,3 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
