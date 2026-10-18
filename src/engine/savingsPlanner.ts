@@ -10,7 +10,7 @@ import type {
 } from './types.js';
 
 const LIFESTYLE_LEAK_REGEX =
-  /dining|restaurant|cafe|café|coffee|koffie|matcha|bar|takeout|thuisbezorgd|uber\s*eats|deliveroo|snack|bakery|bakker|uit\s*eten|horeca|shopping|winkel|kleding|clothing|gadget|hardware|electronic|entertainment|leisure|uitgaan|hobby|impulse|game|alcohol|lunch/i;
+  /eating\s*out|dining|restaurant|cafe|café|coffee|koffie|matcha|bar|takeout|thuisbezorgd|uber\s*eats|deliveroo|snack|bakery|bakker|uit\s*eten|horeca|shopping|winkel|kleding|clothing|gadget|hardware|electronic|entertainment|leisure|uitgaan|hobby|impulse|game|alcohol|lunch/i;
 
 const FIXED_ESSENTIAL_REGEX =
   /rent|huur|mortgage|hypotheek|insurance|verzekering|tax|belasting|utilities|energie|stroom|gas|water|internet|telecom|lease|loan|lening|zorg|health\s*insurance/i;
@@ -101,14 +101,21 @@ export class SavingsPlanner {
       }
     }
 
-    // Map Zenmoney budgets by category title (prefer current month YYYY-MM-01)
+    // Map Zenmoney budgets by category title for currentMonthStart
+    // Only fall back to the most recent month if currentMonthStart has no budgets at all
+    const sortedBudgets = [...params.budgets].sort((a, b) => b.date.localeCompare(a.date));
+    const hasCurrentMonthBudgets = sortedBudgets.some((b) => b.date === currentMonthStart);
     const budgetByCategory = new Map<string, Decimal>();
-    for (const b of params.budgets) {
+    for (const b of sortedBudgets) {
       const catName = b.categoryTitle || b.category;
       if (!catName) continue;
       const bDec = new Decimal(b.budgetedOutcome || 0);
       if (bDec.lessThanOrEqualTo(0)) continue;
-      if (b.date === currentMonthStart || !budgetByCategory.has(catName)) {
+      if (hasCurrentMonthBudgets) {
+        if (b.date === currentMonthStart) {
+          budgetByCategory.set(catName, bDec);
+        }
+      } else if (!budgetByCategory.has(catName)) {
         budgetByCategory.set(catName, bDec);
       }
     }

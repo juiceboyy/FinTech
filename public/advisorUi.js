@@ -112,7 +112,7 @@
     }
 
     tbody.innerHTML = categories
-      .slice(0, 10)
+      .slice(0, 15)
       .map((c) => {
         const zmBudgetText = c.zenmoneyBudget !== null ? `EUR ${Number(c.zenmoneyBudget).toFixed(2)}` : 'Niet ingesteld';
         const recText = `EUR ${Number(c.recommendedMonthlyBudget).toFixed(2)}`;

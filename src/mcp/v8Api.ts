@@ -30,35 +30,12 @@ interface RawTransaction {
   deleted?: boolean;
 }
 
-interface RawReminder {
-  id: string;
-  income?: number;
-  outcome?: number;
-  incomeAccount?: string;
-  outcomeAccount?: string;
-  tag?: string[] | null;
-  merchant?: string | null;
-  payee?: string | null;
-  comment?: string | null;
-  deleted?: boolean;
-}
-
-interface RawReminderMarker {
-  id: string;
-  date: string;
-  income: number;
-  outcome: number;
-  incomeAccount?: string;
-  outcomeAccount?: string;
-  state?: 'planned' | 'processed' | 'deleted';
-  isForecast?: boolean;
-  reminder?: string;
-  tag?: string[] | null;
-  merchant?: string | null;
-  payee?: string | null;
-  comment?: string | null;
-  deleted?: boolean;
-}
+import {
+  normalizeZenmoneyBudgets,
+  type RawBudget,
+  type RawReminder,
+  type RawReminderMarker,
+} from './v8BudgetNormalizer.js';
 
 interface RawTag {
   id: string;
@@ -76,13 +53,6 @@ interface RawMerchant {
 interface RawUser {
   id: number;
   currency?: number;
-}
-
-interface RawBudget {
-  tag?: string | null;
-  date: string;
-  income?: number;
-  outcome?: number;
 }
 
 export class ZenmoneyV8SyncService {
@@ -271,15 +241,12 @@ export class ZenmoneyV8SyncService {
       })
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    const budgets: ZenmoneyBudget[] = (data.budget || [])
-      .filter((b) => Boolean(b.tag) && new Decimal(b.outcome || 0).greaterThan(0))
-      .map((b, idx) => ({
-        id: `${b.date}-${b.tag || idx}`,
-        date: b.date,
-        category: b.tag || 'General',
-        categoryTitle: b.tag ? tagMap.get(b.tag) || 'General' : 'General',
-        budgetedOutcome: new Decimal(b.outcome || 0).toDecimalPlaces(2).toNumber(),
-      }));
+    const budgets: ZenmoneyBudget[] = normalizeZenmoneyBudgets({
+      rawBudgets: data.budget || [],
+      rawReminderMarkers: data.reminderMarker || [],
+      reminderMap,
+      tagMap,
+    });
 
     return {
       accounts,

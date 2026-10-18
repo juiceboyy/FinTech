@@ -134,12 +134,18 @@ export class FinancialDataNormalizer {
       : new Decimal(0);
 
     // Category breakdown
+    const currentMonthStart = `${endDate.slice(0, 7)}-01`;
+    const hasCurrentMonthBudgets = params.budgets.some((b) => b.date === currentMonthStart);
     const categoryBreakdown: CategoryExpense[] = Object.entries(categoryTotals)
       .map(([category, amountDec]) => {
         const percentage = totalExpensesDec.greaterThan(0)
           ? amountDec.dividedBy(totalExpensesDec).times(100).toDecimalPlaces(1).toNumber()
           : 0;
-        const matchingBudget = params.budgets.find((b) => b.category === category || b.categoryTitle === category);
+        const matchingBudget = hasCurrentMonthBudgets
+          ? params.budgets.find(
+              (b) => b.date === currentMonthStart && (b.category === category || b.categoryTitle === category)
+            )
+          : params.budgets.find((b) => b.category === category || b.categoryTitle === category);
         return {
           category,
           amount: amountDec.toDecimalPlaces(2).toNumber(),

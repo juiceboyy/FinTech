@@ -7,6 +7,7 @@ import { PromptContextBuilder } from '../src/ai/promptContextBuilder.js';
 import { financialChatService } from '../src/ai/financialChatService.js';
 import { morningDigestService } from '../src/ai/morningDigestService.js';
 import { generateMockFinancialData } from '../src/engine/mockData.js';
+import { normalizeZenmoneyBudgets } from '../src/mcp/v8BudgetNormalizer.js';
 
 test('SavingsPlanner computes daily, weekly, and rest-of-month goals and recommends Zenmoney budgets', () => {
   const today = '2026-10-18';
@@ -144,3 +145,71 @@ test('FinancialChatService and MorningDigestService generate savings-focused res
   assert.ok(digest.markdownContent.includes('Rest van de Maand'), 'Morning digest must include rest-of-month goals');
   assert.ok(!digest.markdownContent.includes('—'), 'Morning digest must never contain em-dashes');
 });
+
+test('normalizeZenmoneyBudgets reconstructs full EUR 1500 Auto budget by adding monthly reminderMarker outflows to budget.outcome', () => {
+  const autoTag = 'c70f553b-c30c-4626-ac82-b89ae6019cdc';
+  const travelTag = '4d20be9f-dbfc-4556-8c46-38a771a4ac09';
+  const tagMap = new Map<string, string>([
+    [autoTag, 'Auto'],
+    [travelTag, 'Travel'],
+  ]);
+
+  const budgets = normalizeZenmoneyBudgets({
+    rawBudgets: [
+      { date: '2026-10-01', tag: autoTag, outcome: 398.01 },
+      { date: '2026-10-01', tag: travelTag, outcome: 0 },
+      { date: '2025-10-01', tag: travelTag, outcome: 173 },
+    ],
+    rawReminderMarkers: [
+      {
+        id: 'm1',
+        date: '2026-10-02',
+        income: 0,
+        outcome: 1100,
+        state: 'processed',
+        tag: [autoTag],
+      },
+      {
+        id: 'm2',
+        date: '2026-10-08',
+        income: 0,
+        outcome: 1.99,
+        state: 'planned',
+        tag: [autoTag],
+      },
+    ],
+    reminderMap: new Map(),
+    tagMap,
+  });
+
+  const octAuto = budgets.find((b) => b.date === '2026-10-01' && b.categoryTitle === 'Auto');
+  assert.ok(octAuto, 'Should include October Auto budget');
+  assert.strictEqual(octAuto.budgetedOutcome, 1500, '398.01 + 1100.00 + 1.99 must equal 1500.00');
+
+  const plan = SavingsPlanner.computeSavingsPlan({
+    referenceDate: '2026-10-18',
+    accounts: [{ id: 'a1', title: 'Checking', type: 'checking', balance: 2000, currency: 'EUR' }],
+    transactions: [
+      {
+        id: 'tx-auto',
+        date: '2026-10-10',
+        income: 0,
+        outcome: 1445.9,
+        outcomeAccount: 'a1',
+        categoryTitle: 'Auto',
+        payee: 'Lease & Fuel',
+        currency: 'EUR',
+      },
+    ],
+    budgets,
+  });
+
+  const autoPlan = plan.categoryPlans.find((c) => c.category === 'Auto');
+  assert.ok(autoPlan);
+  assert.strictEqual(autoPlan.zenmoneyBudget, 1500);
+  assert.strictEqual(autoPlan.remainingMonthAllowance, 54.1);
+
+  const travelPlan = plan.categoryPlans.find((c) => c.category === 'Travel');
+  assert.strictEqual(travelPlan, undefined, 'Stale 2025 Travel budget must not leak into October 2026 when October Travel budget is 0');
+});
+
