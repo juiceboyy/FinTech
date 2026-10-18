@@ -76,3 +76,48 @@ export interface NormalizedFinancialSummary {
   budgets: ZenmoneyBudget[];
   sourceMode: 'live';
 }
+
+export interface CategorySavingsPlan {
+  category: string;
+  spentMonthToDate: number;
+  spentLast30Days: number;
+  dailyAverageSpent: number;
+  zenmoneyBudget: number | null;
+  recommendedMonthlyBudget: number;
+  needsNewZenmoneyGoal: boolean;
+  goalReason: string;
+  remainingMonthAllowance: number;
+  dailyAllowanceRestOfMonth: number;
+  weeklyAllowance: number;
+  potentialDailySavings: number;
+  potentialWeeklySavings: number;
+  potentialMonthlySavings: number;
+  isLifestyleLeak: boolean;
+}
+
+export interface SavingsGoalsSummary {
+  referenceDate: string;
+  currentMonthStart: string;
+  currentMonthEnd: string;
+  daysInMonth: number;
+  daysElapsedInMonth: number;
+  daysRemainingInMonth: number;
+  daysRemainingInWeek: number;
+  monthlyIncomeToDate: number;
+  monthlyExpensesToDate: number;
+  monthlySavingsTransfersToDate: number;
+  currentSavingsRatePercentage: number;
+  targetSavingsRatePercentage: number;
+  targetMonthlySavingsAmount: number;
+  potentialExtraMonthlySavings: number;
+  potentialExtraDailySavings: number;
+  potentialExtraWeeklySavings: number;
+  todayTargetVariableSpendLimit: number;
+  todayTargetSavingsAmount: number;
+  weekTargetVariableSpendLimit: number;
+  weekTargetSavingsAmount: number;
+  restOfMonthVariableSpendLimit: number;
+  restOfMonthTargetSavingsAmount: number;
+  categoryPlans: CategorySavingsPlan[];
+}
+

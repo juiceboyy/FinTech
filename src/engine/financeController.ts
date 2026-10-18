@@ -1,10 +1,27 @@
 import { mcpClient } from '../mcp/client.js';
 import { FinancialDataNormalizer } from './dataNormalizer.js';
-import type { NormalizedFinancialSummary } from './types.js';
+import { SavingsPlanner } from './savingsPlanner.js';
+import type { NormalizedFinancialSummary, SavingsGoalsSummary } from './types.js';
 import type { ZenmoneyAccount, ZenmoneyTransaction, ZenmoneyBudget } from '../mcp/types.js';
+
+export interface AdvisorDataset {
+  summary: NormalizedFinancialSummary;
+  savingsPlan: SavingsGoalsSummary;
+  allRecentTransactions: ZenmoneyTransaction[];
+}
 
 export class FinanceController {
   public async getFinancialSummary(periodDays = 15): Promise<NormalizedFinancialSummary> {
+    const dataset = await this.getAdvisorDataset(periodDays);
+    return dataset.summary;
+  }
+
+  public async getSavingsGoals(): Promise<SavingsGoalsSummary> {
+    const dataset = await this.getAdvisorDataset(15);
+    return dataset.savingsPlan;
+  }
+
+  public async getAdvisorDataset(periodDays = 15): Promise<AdvisorDataset> {
     let status = mcpClient.getStatus();
 
     if (!status.connected) {
@@ -22,7 +39,7 @@ export class FinanceController {
       if (!liveSync) {
         throw new Error('Failed to retrieve live Zenmoney sync data.');
       }
-      return FinancialDataNormalizer.normalize({
+      const summary = FinancialDataNormalizer.normalize({
         accounts: liveSync.accounts,
         transactions: liveSync.transactions,
         plannedTransactions: liveSync.plannedTransactions,
@@ -30,16 +47,36 @@ export class FinanceController {
         periodDays,
         sourceMode: 'live',
       });
+      const savingsPlan = SavingsPlanner.computeSavingsPlan({
+        accounts: liveSync.accounts,
+        transactions: liveSync.transactions,
+        budgets: liveSync.budgets,
+      });
+      return {
+        summary,
+        savingsPlan,
+        allRecentTransactions: liveSync.transactions.slice(0, 200),
+      };
     }
 
     const liveData = await this.fetchRemoteMcpData();
-    return FinancialDataNormalizer.normalize({
+    const summary = FinancialDataNormalizer.normalize({
       accounts: liveData.accounts,
       transactions: liveData.transactions,
       budgets: liveData.budgets,
       periodDays,
       sourceMode: 'live',
     });
+    const savingsPlan = SavingsPlanner.computeSavingsPlan({
+      accounts: liveData.accounts,
+      transactions: liveData.transactions,
+      budgets: liveData.budgets,
+    });
+    return {
+      summary,
+      savingsPlan,
+      allRecentTransactions: liveData.transactions.slice(0, 200),
+    };
   }
 
   private async fetchRemoteMcpData(): Promise<{
