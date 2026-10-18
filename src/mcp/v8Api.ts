@@ -78,6 +78,13 @@ interface RawUser {
   currency?: number;
 }
 
+interface RawBudget {
+  tag?: string | null;
+  date: string;
+  income?: number;
+  outcome?: number;
+}
+
 export class ZenmoneyV8SyncService {
   private endpoint = 'https://api.zenmoney.app/v8/diff/';
 
@@ -85,14 +92,8 @@ export class ZenmoneyV8SyncService {
     try {
       const res = await fetch(this.endpoint, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          serverTimestamp: 0,
-          currentClientTimestamp: Math.floor(Date.now() / 1000),
-        }),
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverTimestamp: 0, currentClientTimestamp: Math.floor(Date.now() / 1000) }),
       });
       return res.ok;
     } catch {
@@ -103,14 +104,8 @@ export class ZenmoneyV8SyncService {
   public async fetchSyncData(token: string): Promise<ZenmoneySyncData> {
     const res = await fetch(this.endpoint, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        serverTimestamp: 0,
-        currentClientTimestamp: Math.floor(Date.now() / 1000),
-      }),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverTimestamp: 0, currentClientTimestamp: Math.floor(Date.now() / 1000) }),
     });
 
     if (!res.ok) {
@@ -124,6 +119,7 @@ export class ZenmoneyV8SyncService {
       transaction?: RawTransaction[];
       reminder?: RawReminder[];
       reminderMarker?: RawReminderMarker[];
+      budget?: RawBudget[];
       tag?: RawTag[];
       merchant?: RawMerchant[];
       user?: RawUser[];
@@ -275,7 +271,15 @@ export class ZenmoneyV8SyncService {
       })
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    const budgets: ZenmoneyBudget[] = [];
+    const budgets: ZenmoneyBudget[] = (data.budget || [])
+      .filter((b) => Boolean(b.tag) && new Decimal(b.outcome || 0).greaterThan(0))
+      .map((b, idx) => ({
+        id: `${b.date}-${b.tag || idx}`,
+        date: b.date,
+        category: b.tag || 'General',
+        categoryTitle: b.tag ? tagMap.get(b.tag) || 'General' : 'General',
+        budgetedOutcome: new Decimal(b.outcome || 0).toDecimalPlaces(2).toNumber(),
+      }));
 
     return {
       accounts,

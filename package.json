@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "test": "tsx --test test/smoke.test.ts test/importer.test.ts test/reportStorage.test.ts"
+    "test": "tsx --test test/smoke.test.ts test/importer.test.ts test/reportStorage.test.ts test/savingsAndAdvisor.test.ts"
   },
   "keywords": [
     "zenmoney",

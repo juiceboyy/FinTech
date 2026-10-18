@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/components.css">
   <link rel="stylesheet" href="/importer.css">
+  <link rel="stylesheet" href="/advisor.css">
 </head>
 <body>
   <div class="container">
@@ -20,8 +21,9 @@
         <div class="system-status-pills">
           <span id="mcp-pill" class="status-pill status-muted">MCP: Checking...</span>
           <span id="gemini-pill" class="status-pill status-muted">Gemini: Checking...</span>
-          <span id="cron-pill" class="status-pill status-muted">Cron: 1st &amp; 15th</span>
+          <span id="cron-pill" class="status-pill status-muted">Cron: 07:30 Daily &amp; 1st/15th</span>
         </div>
+        <button id="send-morning-email-btn" class="btn">Stuur Ochtendmail Nu</button>
         <button id="run-audit-btn" class="btn btn-primary">Run Health Check Now</button>
       </div>
     </header>
@@ -62,6 +64,82 @@
         <span class="kpi-label">Liquid Capital</span>
         <div class="kpi-value" id="kpi-liquid">EUR 0.00</div>
         <span class="kpi-subtext">Checking, Savings &amp; Cash</span>
+      </div>
+    </section>
+
+    <!-- AI Financial Coach & Daily/Weekly/Monthly Savings Goals -->
+    <section class="advisor-grid">
+      <!-- Left: Interactive AI Financial Coach Chat -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <h2>AI Financiele Coach</h2>
+            <span class="panel-meta">Volledige Zenmoney data in prompt - Focus op dagelijks sparen per uitgavenpost</span>
+          </div>
+          <button type="button" id="chat-clear-btn" class="btn-text-action">Wis Gesprek</button>
+        </div>
+
+        <div class="quick-prompts">
+          <button type="button" class="prompt-chip" data-prompt="Hoeveel euro kan ik per dag besparen en op welk soort uitgave moet ik als eerste ingrijpen?">Hoeveel per dag besparen &amp; welke uitgaven?</button>
+          <button type="button" class="prompt-chip" data-prompt="Welke nieuwe of scherpere maandbudgetten raad je mij aan om vandaag in Zenmoney in te stellen?">Voorgestelde Zenmoney maandbudgetten</button>
+          <button type="button" class="prompt-chip" data-prompt="Wat zijn mijn concrete spaardoelen voor vandaag, deze week en de rest van de maand?">Doelen vandaag, deze week &amp; rest van de maand</button>
+          <button type="button" class="prompt-chip" data-prompt="Analyseer al mijn uitgaven aan uit eten, koffie/matcha en winkelen van de afgelopen maand.">Analyseer horeca, koffie &amp; winkelen</button>
+        </div>
+
+        <div class="chat-thread" id="chat-thread"></div>
+
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" class="chat-input" placeholder="Stel een vraag over je financien, spaarruimte of categoriebudgetten...">
+          <button type="button" id="chat-send-btn" class="btn btn-primary">Verstuur Vraag</button>
+        </div>
+
+        <div id="morning-digest-preview" class="digest-preview-box" style="display: none;"></div>
+      </div>
+
+      <!-- Right: Daily, Weekly & Rest-of-Month Savings Plan + Zenmoney Budgets -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <h2>Spaardoelen: Dag, Week &amp; Maand</h2>
+            <span class="panel-meta" id="savings-plan-meta">Berekend op basis van Zenmoney data</span>
+          </div>
+        </div>
+
+        <div class="savings-horizon-grid">
+          <div class="horizon-card">
+            <span class="horizon-label">Doel Vandaag</span>
+            <div class="horizon-primary" id="goal-today-save">Bespaar EUR 0.00 / dag</div>
+            <div class="horizon-secondary" id="goal-today-limit">Max variabele uitgaven vandaag: EUR 0.00</div>
+          </div>
+          <div class="horizon-card">
+            <span class="horizon-label">Doel Deze Week (7d)</span>
+            <div class="horizon-primary" id="goal-week-save">Bespaar EUR 0.00 / week</div>
+            <div class="horizon-secondary" id="goal-week-limit">Max weekbudget variabel: EUR 0.00</div>
+          </div>
+          <div class="horizon-card">
+            <span class="horizon-label">Rest van de Maand</span>
+            <div class="horizon-primary" id="goal-month-save">Maanddoel: EUR 0.00</div>
+            <div class="horizon-secondary" id="goal-month-limit">Resterend variabel: EUR 0.00</div>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="ledger-table">
+            <thead>
+              <tr>
+                <th>Categorie</th>
+                <th class="text-right">Deze Mnd</th>
+                <th class="text-right">Zenmoney Budget</th>
+                <th class="text-right">Voorgesteld Doel</th>
+                <th class="text-right">Max Dag / Week</th>
+                <th class="text-right">Besparing / Dag</th>
+              </tr>
+            </thead>
+            <tbody id="savings-category-tbody">
+              <tr><td colspan="6" class="empty-state">Spaardoelen laden...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -194,6 +272,7 @@
 
   <script src="/reportStore.js"></script>
   <script src="/reportUi.js"></script>
+  <script src="/advisorUi.js"></script>
   <script src="/app.js"></script>
   <script src="/importerUtils.js"></script>
   <script src="/importer.js"></script>

@@ -7,11 +7,15 @@ import { geminiService, GEMINI_MODEL } from '../ai/geminiClient.js';
 import { reportStorage } from '../ai/reportStorage.js';
 import { cronService } from '../scheduler/cronService.js';
 import { importRouter } from './importRoutes.js';
+import { advisorRouter } from './advisorRoutes.js';
 
 export const apiRouter = Router();
 
 // ING Credit Card CSV Importer Routes
 apiRouter.use('/import', importRouter);
+
+// AI Financial Coach, Savings Plan & Daily Morning Email Routes
+apiRouter.use('/advisor', advisorRouter);
 
 // System Status
 apiRouter.get('/status', (_req: Request, res: Response) => {

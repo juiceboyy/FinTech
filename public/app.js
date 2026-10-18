@@ -25,7 +25,7 @@ async function fetchStatus() {
     }
 
     const cronPill = document.getElementById('cron-pill');
-    cronPill.textContent = data.cron.active ? 'Cron: Active (1st & 15th)' : 'Cron: Inactive';
+    cronPill.textContent = data.cron.active ? 'Cron: 07:30 Daily & 1st/15th' : 'Cron: Inactive';
   } catch (err) {
     console.error('Error fetching system status:', err);
   }
@@ -174,6 +174,9 @@ async function connectToken() {
       input.value = '';
       await fetchStatus();
       await fetchFinancialSummary();
+      if (window.AdvisorUI) {
+        await window.AdvisorUI.fetchSavingsPlan();
+      }
     } else {
       if (errBox) {
         errBox.textContent = data.status?.error || 'Could not authenticate token with Zenmoney MCP.';
