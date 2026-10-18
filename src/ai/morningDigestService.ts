@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Decimal } from 'decimal.js';
 import { geminiService, GEMINI_MODEL } from './geminiClient.js';
 import { PromptContextBuilder } from './promptContextBuilder.js';
@@ -14,8 +15,15 @@ export interface MorningDigestReport {
   emailResult: EmailSendResult;
 }
 
+export interface MorningDigestOptions {
+  skipEmail?: boolean;
+}
+
 export class MorningDigestService {
-  public async generateAndSendDigest(dataset: AdvisorDataset): Promise<MorningDigestReport> {
+  public async generateAndSendDigest(
+    dataset: AdvisorDataset,
+    options: MorningDigestOptions = {}
+  ): Promise<MorningDigestReport> {
     const { savingsPlan } = dataset;
     const subject = `Fintech Ochtendplan (${savingsPlan.referenceDate}) - Dagdoel: Bespaar EUR ${new Decimal(savingsPlan.todayTargetSavingsAmount).toFixed(2)}`;
 
@@ -36,19 +44,29 @@ export class MorningDigestService {
       generatedBy = 'local-morning-engine';
     }
 
-    const emailResult = await emailService.sendEmail({
-      subject,
-      markdownBody: markdownContent,
-      idempotencyKey: `morning-digest/${savingsPlan.referenceDate}`,
-      templateVariables: {
-        REFERENCE_DATE: savingsPlan.referenceDate,
-        TODAY_SPEND_LIMIT: new Decimal(savingsPlan.todayTargetVariableSpendLimit).toFixed(2),
-        TODAY_SAVINGS_GOAL: new Decimal(savingsPlan.todayTargetSavingsAmount).toFixed(2),
-        WEEK_SPEND_LIMIT: new Decimal(savingsPlan.weekTargetVariableSpendLimit).toFixed(2),
-        WEEK_SAVINGS_GOAL: new Decimal(savingsPlan.weekTargetSavingsAmount).toFixed(2),
-        MONTH_SAVINGS_GOAL: new Decimal(savingsPlan.targetMonthlySavingsAmount).toFixed(2),
-      },
-    });
+    const contentHash = createHash('sha256').update(markdownContent).digest('hex').slice(0, 12);
+    const idempotencyKey = `morning-digest/${savingsPlan.referenceDate}/${contentHash}`;
+
+    const emailResult: EmailSendResult = options.skipEmail
+      ? {
+          sent: false,
+          recipient: emailService.getStatus().recipient,
+          idempotencyKey,
+          error: 'Email sending skipped (test mode).',
+        }
+      : await emailService.sendEmail({
+          subject,
+          markdownBody: markdownContent,
+          idempotencyKey,
+          templateVariables: {
+            REFERENCE_DATE: savingsPlan.referenceDate,
+            TODAY_SPEND_LIMIT: new Decimal(savingsPlan.todayTargetVariableSpendLimit).toFixed(2),
+            TODAY_SAVINGS_GOAL: new Decimal(savingsPlan.todayTargetSavingsAmount).toFixed(2),
+            WEEK_SPEND_LIMIT: new Decimal(savingsPlan.weekTargetVariableSpendLimit).toFixed(2),
+            WEEK_SAVINGS_GOAL: new Decimal(savingsPlan.weekTargetSavingsAmount).toFixed(2),
+            MONTH_SAVINGS_GOAL: new Decimal(savingsPlan.targetMonthlySavingsAmount).toFixed(2),
+          },
+        });
 
     return {
       subject,

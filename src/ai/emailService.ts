@@ -69,6 +69,20 @@ export class EmailService {
     const apiKey = this.getApiKey();
     const recipient = this.getRecipient();
 
+    const isTestRunner =
+      process.env.NODE_ENV === 'test' ||
+      process.execArgv.includes('--test') ||
+      process.argv.includes('--test');
+
+    if (isTestRunner) {
+      return {
+        sent: false,
+        recipient,
+        idempotencyKey: params.idempotencyKey,
+        error: 'E-mail verzending overgeslagen tijdens automatische testrun.',
+      };
+    }
+
     if (!apiKey || !recipient) {
       return {
         sent: false,

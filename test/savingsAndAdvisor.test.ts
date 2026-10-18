@@ -139,7 +139,7 @@ test('FinancialChatService and MorningDigestService generate savings-focused res
   assert.ok(!chatRes.reply.includes('—'), 'Chat reply must never contain em-dashes');
   assert.ok(chatRes.reply.includes('per dag') || chatRes.reply.includes('/dag'), 'Chat reply must emphasize daily savings');
 
-  const digest = await morningDigestService.generateAndSendDigest(dataset);
+  const digest = await morningDigestService.generateAndSendDigest(dataset, { skipEmail: true });
   assert.ok(digest.markdownContent.includes('Doelen voor Vandaag'), 'Morning digest must include today goals');
   assert.ok(digest.markdownContent.includes('Doelen Verspreid over Deze Week'), 'Morning digest must include weekly goals');
   assert.ok(digest.markdownContent.includes('Rest van de Maand'), 'Morning digest must include rest-of-month goals');
