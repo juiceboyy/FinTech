@@ -1,7 +1,10 @@
+import { Resend, type CreateEmailOptions } from 'resend';
+
 export interface EmailStatus {
   configured: boolean;
   recipient: string | null;
   sender: string;
+  templateId: string | null;
   provider: 'resend' | 'unconfigured';
 }
 
@@ -9,7 +12,15 @@ export interface EmailSendResult {
   sent: boolean;
   recipient: string | null;
   messageId?: string;
+  idempotencyKey?: string;
   error?: string;
+}
+
+export interface SendEmailParams {
+  subject: string;
+  markdownBody: string;
+  idempotencyKey?: string;
+  templateVariables?: Record<string, string | number>;
 }
 
 export class EmailService {
@@ -23,14 +34,19 @@ export class EmailService {
 
   private getRecipient(): string | null {
     const to = process.env.MORNING_EMAIL_TO?.trim();
-    if (!to || to === 'jouw@email.nl') {
-      return null;
+    if (to && to !== 'jouw@email.nl') {
+      return to;
     }
-    return to;
+    return 'halfhide@gmail.com';
   }
 
   private getSender(): string {
     return process.env.MORNING_EMAIL_FROM?.trim() || 'Fintech Coach <onboarding@resend.dev>';
+  }
+
+  private getTemplateId(): string | null {
+    const id = process.env.RESEND_MORNING_TEMPLATE_ID?.trim();
+    return id || null;
   }
 
   public getStatus(): EmailStatus {
@@ -42,14 +58,12 @@ export class EmailService {
       configured,
       recipient,
       sender: this.getSender(),
+      templateId: this.getTemplateId(),
       provider: configured ? 'resend' : 'unconfigured',
     };
   }
 
-  public async sendEmail(params: {
-    subject: string;
-    markdownBody: string;
-  }): Promise<EmailSendResult> {
+  public async sendEmail(params: SendEmailParams): Promise<EmailSendResult> {
     const apiKey = this.getApiKey();
     const recipient = this.getRecipient();
 
@@ -61,47 +75,88 @@ export class EmailService {
       };
     }
 
+    const resend = new Resend(apiKey);
+    const sender = this.getSender();
+    const templateId = this.getTemplateId();
     const htmlBody = this.markdownToEditorialHtml(params.subject, params.markdownBody);
 
-    try {
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: this.getSender(),
+    const payload: CreateEmailOptions = templateId
+      ? {
+          from: sender,
+          to: [recipient],
+          subject: params.subject,
+          template: {
+            id: templateId,
+            variables: {
+              SUBJECT: params.subject,
+              BODY_TEXT: params.markdownBody.slice(0, 1950),
+              ...(params.templateVariables ?? {}),
+            },
+          },
+        }
+      : {
+          from: sender,
           to: [recipient],
           subject: params.subject,
           html: htmlBody,
           text: params.markdownBody,
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        return {
-          sent: false,
-          recipient,
-          error: `Resend API fout (HTTP ${response.status}): ${errText || 'Kon e-mail niet verzenden'}`,
         };
-      }
 
-      const data = (await response.json()) as { id?: string };
-      return {
-        sent: true,
-        recipient,
-        messageId: data.id,
-      };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        sent: false,
-        recipient,
-        error: `E-mail netwerkfout: ${msg}`,
-      };
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const { data, error, headers } = await resend.emails.send(
+          payload,
+          params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : undefined
+        );
+
+        if (!error && data) {
+          console.log(`[Resend] Email sent successfully (id: ${data.id})`);
+          return {
+            sent: true,
+            recipient,
+            messageId: data.id,
+            idempotencyKey: params.idempotencyKey,
+          };
+        }
+
+        const statusCode = error?.statusCode ?? 400;
+        const isRetryable = statusCode === 429 || statusCode >= 500;
+        if (!isRetryable || attempt === maxAttempts) {
+          return {
+            sent: false,
+            recipient,
+            idempotencyKey: params.idempotencyKey,
+            error: `Resend API fout (${error?.name ?? statusCode}): ${error?.message ?? 'Kon e-mail niet verzenden'}`,
+          };
+        }
+
+        const retryAfterSec = Number(headers?.['retry-after']);
+        const delayMs =
+          Number.isFinite(retryAfterSec) && retryAfterSec > 0
+            ? retryAfterSec * 1000
+            : 500 * Math.pow(2, attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      } catch (err: unknown) {
+        if (attempt === maxAttempts) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return {
+            sent: false,
+            recipient,
+            idempotencyKey: params.idempotencyKey,
+            error: `E-mail netwerkfout: ${msg}`,
+          };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500 * Math.pow(2, attempt - 1)));
+      }
     }
+
+    return {
+      sent: false,
+      recipient,
+      idempotencyKey: params.idempotencyKey,
+      error: 'Kon e-mail niet verzenden na meerdere pogingen.',
+    };
   }
 
   private markdownToEditorialHtml(title: string, markdown: string): string {

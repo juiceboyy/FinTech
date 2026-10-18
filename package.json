@@ -30,6 +30,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "node-cron": "^3.0.3",
+    "resend": "^6.34.1",
     "serverless-http": "^4.0.0",
     "zod": "^4.6.7"
   },

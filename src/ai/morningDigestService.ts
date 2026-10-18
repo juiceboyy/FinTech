@@ -39,6 +39,15 @@ export class MorningDigestService {
     const emailResult = await emailService.sendEmail({
       subject,
       markdownBody: markdownContent,
+      idempotencyKey: `morning-digest/${savingsPlan.referenceDate}`,
+      templateVariables: {
+        REFERENCE_DATE: savingsPlan.referenceDate,
+        TODAY_SPEND_LIMIT: new Decimal(savingsPlan.todayTargetVariableSpendLimit).toFixed(2),
+        TODAY_SAVINGS_GOAL: new Decimal(savingsPlan.todayTargetSavingsAmount).toFixed(2),
+        WEEK_SPEND_LIMIT: new Decimal(savingsPlan.weekTargetVariableSpendLimit).toFixed(2),
+        WEEK_SAVINGS_GOAL: new Decimal(savingsPlan.weekTargetSavingsAmount).toFixed(2),
+        MONTH_SAVINGS_GOAL: new Decimal(savingsPlan.targetMonthlySavingsAmount).toFixed(2),
+      },
     });
 
     return {
