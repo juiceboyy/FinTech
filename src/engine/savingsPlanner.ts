@@ -15,6 +15,11 @@ const LIFESTYLE_LEAK_REGEX =
 const FIXED_ESSENTIAL_REGEX =
   /rent|huur|mortgage|hypotheek|insurance|verzekering|tax|belasting|utilities|energie|stroom|gas|water|internet|telecom|lease|loan|lening|zorg|health\s*insurance/i;
 
+const ESSENTIAL_VARIABLE_REGEX =
+  /grocer|boodschap|supermark|food|voeding|eten|apotheek|pharmacy|medisch|medical/i;
+
+const MIN_DAILY_ESSENTIAL_FOOD_FLOOR = new Decimal('8.50');
+
 const SAVINGS_ACCOUNT_REGEX = /buffer|spaar|saving|reserve|vault/i;
 
 export class SavingsPlanner {
@@ -144,6 +149,7 @@ export class SavingsPlanner {
 
       const isFixed = FIXED_ESSENTIAL_REGEX.test(category);
       const isLifestyleLeak = !isFixed && LIFESTYLE_LEAK_REGEX.test(category);
+      const isEssentialVariable = !isFixed && !isLifestyleLeak && ESSENTIAL_VARIABLE_REGEX.test(category);
 
       const dailyAvgDec = l30Dec.greaterThan(0)
         ? l30Dec.dividedBy(thirtyDec)
@@ -174,8 +180,40 @@ export class SavingsPlanner {
             ? `Leefstijllek: verlaag je huidige Zenmoney-budget (EUR ${zmBudgetDec.toFixed(2)}) met 35% naar EUR ${recommendedDec.toFixed(2)}`
             : `Leefstijllek zonder limiet: stel EUR ${recommendedDec.toFixed(2)}/mnd in als nieuw budget in Zenmoney (-35%)`;
         }
+      } else if (isEssentialVariable) {
+        // Essential living category (e.g. Groceries): never starve to EUR 0/day!
+        // When Eating Out is frozen, the user must cook at home. Guarantee at least a sober daily food floor.
+        const soberDailyDec = Decimal.max(
+          MIN_DAILY_ESSENTIAL_FOOD_FLOOR,
+          dailyAvgDec.times(new Decimal('0.70')).toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+        );
+        const minNeededRestOfMonthDec = soberDailyDec.times(daysRemainingDec);
+        const minRealisticMonthTotalDec = mtdDec
+          .plus(minNeededRestOfMonthDec)
+          .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+
+        if (zmBudgetDec) {
+          const remainingFromZmDec = zmBudgetDec.minus(mtdDec);
+          const dailyFromZmDec = remainingFromZmDec.dividedBy(daysRemainingDec);
+          if (dailyFromZmDec.lessThan(MIN_DAILY_ESSENTIAL_FOOD_FLOOR)) {
+            recommendedDec = minRealisticMonthTotalDec;
+            needsNewZenmoneyGoal = true;
+            goalReason = `Essentiele levensbehoefte (thuis koken i.p.v. horeca): huidige Zenmoney-limiet (EUR ${zmBudgetDec.toFixed(2)}) is te krap voor de resterende ${daysRemainingInMonth} dagen. Verhoog in Zenmoney naar EUR ${recommendedDec.toFixed(2)}/mnd (sober dagbudget EUR ${soberDailyDec.toFixed(2)}/dag, gedekt uit besparing op Eating out)`;
+          } else {
+            recommendedDec = zmBudgetDec;
+            goalReason = 'Essentieel voedingsbudget voor thuis koken';
+          }
+        } else {
+          const efficientTargetDec = Decimal.max(
+            minRealisticMonthTotalDec,
+            baselineMonthlyDec.times(new Decimal('0.85')).toDecimalPlaces(0, Decimal.ROUND_HALF_UP)
+          );
+          recommendedDec = efficientTargetDec;
+          needsNewZenmoneyGoal = true;
+          goalReason = `Essentiele levensbehoefte zonder limiet: stel EUR ${recommendedDec.toFixed(2)}/mnd in bij Zenmoney voor boodschappen`;
+        }
       } else {
-        // Regular variable category (e.g. groceries, transport): target 15% efficiency savings if unbudgeted or overspent
+        // Regular variable category (e.g. transport, gifts, services): target 15% efficiency savings if unbudgeted or overspent
         const efficientTargetDec = baselineMonthlyDec.times(new Decimal('0.85')).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
         if (zmBudgetDec) {
           if (mtdDec.greaterThan(zmBudgetDec)) {

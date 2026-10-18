@@ -55,7 +55,7 @@ test('SavingsPlanner computes daily, weekly, and rest-of-month goals and recomme
         date: '2026-10-01',
         category: 'Groceries',
         categoryTitle: 'Groceries',
-        budgetedOutcome: 500,
+        budgetedOutcome: 550,
       },
     ],
   });
@@ -78,8 +78,54 @@ test('SavingsPlanner computes daily, weekly, and rest-of-month goals and recomme
 
   const groceriesPlan = plan.categoryPlans.find((c) => c.category === 'Groceries');
   assert.ok(groceriesPlan, 'Should include Groceries category plan');
-  assert.strictEqual(groceriesPlan.zenmoneyBudget, 500, 'Must match configured Zenmoney budget');
-  assert.strictEqual(groceriesPlan.remainingMonthAllowance, 100, '500 budget minus 400 spent = 100 remaining');
+  assert.strictEqual(groceriesPlan.zenmoneyBudget, 550, 'Must match configured Zenmoney budget');
+  assert.strictEqual(groceriesPlan.remainingMonthAllowance, 150, '550 budget minus 400 spent = 150 remaining');
+});
+
+test('SavingsPlanner never starves Groceries to EUR 0/day when Eating out is frozen and Groceries budget is exceeded', () => {
+  const plan = SavingsPlanner.computeSavingsPlan({
+    referenceDate: '2026-10-18',
+    accounts: [{ id: 'acc-1', title: 'Privé', type: 'checking', balance: 461.13, currency: 'EUR' }],
+    transactions: [
+      {
+        id: 'tx-eo',
+        date: '2026-10-10',
+        income: 0,
+        outcome: 328.93,
+        outcomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        payee: 'Restaurants',
+        currency: 'EUR',
+      },
+      {
+        id: 'tx-gr',
+        date: '2026-10-12',
+        income: 0,
+        outcome: 240.68,
+        outcomeAccount: 'acc-1',
+        categoryTitle: 'Groceries',
+        payee: 'Albert Heijn',
+        currency: 'EUR',
+      },
+    ],
+    budgets: [
+      { id: 'b-eo', date: '2026-10-01', category: 'Eating out', categoryTitle: 'Eating out', budgetedOutcome: 153 },
+      { id: 'b-gr', date: '2026-10-01', category: 'Groceries', categoryTitle: 'Groceries', budgetedOutcome: 200 },
+    ],
+  });
+
+  const eatingOut = plan.categoryPlans.find((c) => c.category === 'Eating out');
+  const groceries = plan.categoryPlans.find((c) => c.category === 'Groceries');
+  assert.ok(eatingOut && groceries);
+  assert.strictEqual(eatingOut.dailyAllowanceRestOfMonth, 0, 'Eating out must be frozen at EUR 0/day');
+  assert.ok(
+    new Decimal(groceries.dailyAllowanceRestOfMonth).greaterThanOrEqualTo('8.50'),
+    'Groceries must retain a realistic daily home-cooking allowance (>= EUR 8.50/day)'
+  );
+  assert.ok(
+    new Decimal(groceries.weeklyAllowance).greaterThanOrEqualTo('59.50'),
+    'Groceries must retain a realistic weekly home-cooking allowance'
+  );
 });
 
 test('PromptContextBuilder includes all financial data, transactions, and category savings goals', () => {
