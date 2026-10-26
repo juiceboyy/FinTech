@@ -79,6 +79,7 @@ export interface NormalizedFinancialSummary {
 
 export interface CategorySavingsPlan {
   category: string;
+  categoryId?: string;
   spentMonthToDate: number;
   spentLast30Days: number;
   dailyAverageSpent: number;

@@ -196,6 +196,24 @@ export class ZenmoneyMcpClient {
     return map;
   }
 
+  public async commitBudgetsBatch(
+    syncContext: ZenmoneySyncData,
+    items: Array<{
+      categoryId: string;
+      amount: string | number;
+      monthDate?: string;
+    }>
+  ): Promise<Array<{ categoryId: string; outcome: number; date: string }>> {
+    const token = authManager.getAccessToken();
+    if (this.isV8Direct && token) {
+      const results = await v8Mutations.writeBudgetsBatch(token, syncContext, items);
+      this.lastSyncAt = new Date().toISOString();
+      return results;
+    }
+
+    throw new Error('Budget synchronisatie vereist een directe Zenmoney API verbinding.');
+  }
+
   public isDirectMode(): boolean {
     return this.isV8Direct;
   }

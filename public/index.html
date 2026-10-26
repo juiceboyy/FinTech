@@ -103,7 +103,10 @@
             <h2>Spaardoelen: Dag, Week &amp; Maand</h2>
             <span class="panel-meta" id="savings-plan-meta">Berekend op basis van Zenmoney data</span>
           </div>
+          <button type="button" id="apply-all-budgets-btn" class="btn btn-primary btn-sm" style="display: none;">Doelen Doorgeven aan Zenmoney</button>
         </div>
+
+        <div id="budget-sync-feedback" class="importer-feedback" style="display: none; margin-bottom: 12px;"></div>
 
         <div class="savings-horizon-grid">
           <div class="horizon-card">
@@ -133,10 +136,11 @@
                 <th class="text-right">Voorgesteld Doel</th>
                 <th class="text-right">Max Dag / Week</th>
                 <th class="text-right">Besparing / Dag</th>
+                <th class="text-right">Actie</th>
               </tr>
             </thead>
             <tbody id="savings-category-tbody">
-              <tr><td colspan="6" class="empty-state">Spaardoelen laden...</td></tr>
+              <tr><td colspan="7" class="empty-state">Spaardoelen laden...</td></tr>
             </tbody>
           </table>
         </div>
@@ -270,8 +274,39 @@
     </footer>
   </div>
 
+  <!-- Zenmoney Budget Confirmation Modal -->
+  <div id="budget-confirm-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Budgetdoelen Doorgeven aan Zenmoney</h3>
+        <button type="button" id="budget-modal-close-btn" class="modal-close" aria-label="Sluiten">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-description">De volgende maandbudgetten worden direct ingesteld en vergrendeld in Zenmoney:</p>
+        <div class="table-container">
+          <table class="ledger-table">
+            <thead>
+              <tr>
+                <th>Categorie</th>
+                <th class="text-right">Huidig Zenmoney</th>
+                <th class="text-right">Nieuw Doel</th>
+              </tr>
+            </thead>
+            <tbody id="budget-confirm-tbody"></tbody>
+          </table>
+        </div>
+        <p class="modal-note text-muted" id="budget-confirm-note"></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="budget-modal-cancel-btn" class="btn btn-secondary">Annuleren</button>
+        <button type="button" id="budget-modal-confirm-btn" class="btn btn-primary">Bevestig &amp; Doorgeven</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/reportStore.js"></script>
   <script src="/reportUi.js"></script>
+  <script src="/budgetSyncUi.js"></script>
   <script src="/advisorUi.js"></script>
   <script src="/app.js"></script>
   <script src="/importerUtils.js"></script>

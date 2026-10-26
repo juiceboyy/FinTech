@@ -62,9 +62,22 @@
         const isUser = item.role === 'user';
         const roleLabel = isUser ? 'Jij' : 'AI Financiele Coach';
         const cls = isUser ? 'chat-msg chat-msg-user' : 'chat-msg chat-msg-assistant';
-        const bodyHtml = isUser
+        let bodyHtml = isUser
           ? String(item.content).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
           : `<div class="report-content">${formatMarkdownSimple(item.content)}</div>`;
+
+        if (!isUser && item.eligibleBudgetCount && item.eligibleBudgetCount > 0) {
+          bodyHtml += `
+            <div class="chat-budget-actions">
+              <div class="chat-budget-info">
+                <strong>Voorgestelde Zenmoney Budgetten (${item.eligibleBudgetCount})</strong>
+                <span>Geef deze nieuwe doelen direct met één druk op de knop door aan Zenmoney.</span>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm chat-apply-budgets-btn">Doelen Doorgeven</button>
+            </div>
+          `;
+        }
+
         return `
           <div class="${cls}">
             <span class="chat-msg-role">${roleLabel}</span>
@@ -79,6 +92,10 @@
 
   function renderSavingsPlan(plan) {
     if (!plan) return;
+
+    if (window.BudgetSyncUI && typeof window.BudgetSyncUI.setCurrentPlan === 'function') {
+      window.BudgetSyncUI.setCurrentPlan(plan);
+    }
 
     const todaySaveEl = document.getElementById('goal-today-save');
     const todayLimitEl = document.getElementById('goal-today-limit');
@@ -107,7 +124,7 @@
 
     const categories = plan.categoryPlans || [];
     if (categories.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Geen categorie-uitgaven gevonden.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Geen categorie-uitgaven gevonden.</td></tr>';
       return;
     }
 
@@ -121,6 +138,16 @@
             ? `<span class="amount-income">+EUR ${Number(c.potentialDailySavings).toFixed(2)}/dag</span>`
             : 'EUR 0.00/dag';
         const dailyAllowText = `EUR ${Number(c.dailyAllowanceRestOfMonth).toFixed(2)}/dag (EUR ${Number(c.weeklyAllowance).toFixed(2)}/wk)`;
+
+        let actionHtml = '<span class="text-muted">-</span>';
+        if (c.needsNewZenmoneyGoal && c.categoryId) {
+          actionHtml = `<button type="button" class="btn btn-secondary btn-apply-goal" data-category="${c.category}" data-cat-id="${c.categoryId}" data-amount="${c.recommendedMonthlyBudget}" data-current="${c.zenmoneyBudget !== null ? c.zenmoneyBudget : ''}">Instellen</button>`;
+        } else if (c.zenmoneyBudget !== null && Math.abs(c.zenmoneyBudget - c.recommendedMonthlyBudget) < 0.01) {
+          actionHtml = '<span class="badge-synced">Actueel</span>';
+        } else if (c.categoryId) {
+          actionHtml = `<button type="button" class="btn-text-action btn-apply-goal" data-category="${c.category}" data-cat-id="${c.categoryId}" data-amount="${c.recommendedMonthlyBudget}" data-current="${c.zenmoneyBudget !== null ? c.zenmoneyBudget : ''}">Bijwerken</button>`;
+        }
+
         return `
           <tr>
             <td><strong>${c.category}</strong></td>
@@ -129,6 +156,7 @@
             <td class="text-right"><strong>${recText}</strong></td>
             <td class="text-right">${dailyAllowText}</td>
             <td class="text-right">${dailySaveText}</td>
+            <td class="text-right">${actionHtml}</td>
           </tr>
         `;
       })
@@ -182,9 +210,13 @@
           content: `Fout bij ophalen AI-antwoord: ${data.error || 'Onbekende fout'}`,
         });
       } else {
+        const eligibleCount = (data.savingsPlan?.categoryPlans || []).filter(
+          (c) => c.categoryId && (c.needsNewZenmoneyGoal || c.zenmoneyBudget !== c.recommendedMonthlyBudget)
+        ).length;
         chatHistory.push({
           role: 'assistant',
           content: data.reply,
+          eligibleBudgetCount: eligibleCount,
         });
         if (data.savingsPlan) {
           renderSavingsPlan(data.savingsPlan);

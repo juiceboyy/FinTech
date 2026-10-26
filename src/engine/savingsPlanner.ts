@@ -3,6 +3,7 @@ import type {
   ZenmoneyAccount,
   ZenmoneyTransaction,
   ZenmoneyBudget,
+  ZenmoneyCategory,
 } from '../mcp/types.js';
 import type {
   CategorySavingsPlan,
@@ -27,6 +28,7 @@ export class SavingsPlanner {
     accounts: ZenmoneyAccount[];
     transactions: ZenmoneyTransaction[];
     budgets: ZenmoneyBudget[];
+    categories?: ZenmoneyCategory[];
     referenceDate?: string;
   }): SavingsGoalsSummary {
     const refDateStr = params.referenceDate || new Date().toISOString().split('T')[0];
@@ -55,6 +57,25 @@ export class SavingsPlanner {
     const accountById = new Map<string, ZenmoneyAccount>();
     for (const acc of params.accounts) {
       accountById.set(acc.id, acc);
+    }
+
+    const categoryIdByTitle = new Map<string, string>();
+    if (params.categories) {
+      for (const c of params.categories) {
+        if (c.title && c.id) {
+          categoryIdByTitle.set(c.title.toLowerCase(), c.id);
+        }
+      }
+    }
+    for (const b of params.budgets) {
+      if (b.categoryTitle && b.category) {
+        categoryIdByTitle.set(b.categoryTitle.toLowerCase(), b.category);
+      }
+    }
+    for (const tx of params.transactions) {
+      if (tx.categoryTitle && tx.category) {
+        categoryIdByTitle.set(tx.categoryTitle.toLowerCase(), tx.category);
+      }
     }
 
     let monthlyIncomeDec = new Decimal(0);
@@ -249,8 +270,11 @@ export class SavingsPlanner {
         restOfMonthVariableLimitDec = restOfMonthVariableLimitDec.plus(remainingMonthDec);
       }
 
+      const catId = categoryIdByTitle.get(category.toLowerCase());
+
       categoryPlans.push({
         category,
+        categoryId: catId,
         spentMonthToDate: mtdDec.toDecimalPlaces(2).toNumber(),
         spentLast30Days: l30Dec.toDecimalPlaces(2).toNumber(),
         dailyAverageSpent: dailyAvgDec.toDecimalPlaces(2).toNumber(),

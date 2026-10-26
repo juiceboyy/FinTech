@@ -19,11 +19,62 @@ const ChatRequestSchema = z.object({
     .optional(),
 });
 
+const ApplyBudgetsRequestSchema = z.object({
+  monthDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-01$/, 'Datum moet formaat YYYY-MM-01 hebben')
+    .optional(),
+  budgets: z
+    .array(
+      z.object({
+        categoryId: z.string().min(1, 'Category ID is verplicht'),
+        categoryTitle: z.string().optional(),
+        amount: z.union([
+          z.number().min(0, 'Budgetbedrag mag niet negatief zijn'),
+          z.string().regex(/^\d+(\.\d{1,2})?$/, 'Ongeldig bedrag'),
+        ]),
+      })
+    )
+    .min(1, 'Minimaal één budgetdoel vereist'),
+});
+
 // Get Daily, Weekly & Monthly Savings Plan + Zenmoney Category Budget Recommendations
 advisorRouter.get('/savings-plan', async (_req: Request, res: Response) => {
   try {
     const savingsPlan = await financeController.getSavingsGoals();
     res.json(savingsPlan);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Apply AI Financial Coach Recommended Budgets to Zenmoney with One Click
+advisorRouter.post('/apply-budgets', async (req: Request, res: Response) => {
+  try {
+    const parsed = ApplyBudgetsRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: 'Ongeldige budgetaanvraag',
+        details: parsed.error.format(),
+      });
+      return;
+    }
+
+    const { monthDate, budgets } = parsed.data;
+    const items = budgets.map((b) => ({
+      categoryId: b.categoryId,
+      amount: b.amount,
+      monthDate,
+    }));
+
+    const result = await financeController.applyBudgetGoals(items);
+    res.json({
+      success: true,
+      appliedCount: result.appliedCount,
+      updatedBudgets: result.updatedBudgets,
+      savingsPlan: result.savingsPlan,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

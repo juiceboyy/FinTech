@@ -21,6 +21,52 @@ export class FinanceController {
     return dataset.savingsPlan;
   }
 
+  public async applyBudgetGoals(items: Array<{
+    categoryId: string;
+    amount: string | number;
+    monthDate?: string;
+  }>): Promise<{
+    appliedCount: number;
+    updatedBudgets: Array<{ categoryId: string; outcome: number; date: string }>;
+    savingsPlan: SavingsGoalsSummary;
+  }> {
+    let status = mcpClient.getStatus();
+    if (!status.connected) {
+      const connected = await mcpClient.connect();
+      status = mcpClient.getStatus();
+      if (!connected) {
+        throw new Error(
+          status.error || 'Zenmoney MCP is niet verbonden. Configureer ZENMONEY_TOKEN.'
+        );
+      }
+    }
+
+    const liveSync = await mcpClient.getSyncData();
+    if (!liveSync) {
+      throw new Error('Kon geen live Zenmoney data ophalen.');
+    }
+
+    const updatedBudgets = await mcpClient.commitBudgetsBatch(liveSync, items);
+
+    const freshSync = await mcpClient.getSyncData();
+    if (!freshSync) {
+      throw new Error('Kon geen bijgewerkte Zenmoney data ophalen na opslaan.');
+    }
+
+    const freshSavingsPlan = SavingsPlanner.computeSavingsPlan({
+      accounts: freshSync.accounts,
+      transactions: freshSync.transactions,
+      budgets: freshSync.budgets,
+      categories: freshSync.categories,
+    });
+
+    return {
+      appliedCount: updatedBudgets.length,
+      updatedBudgets,
+      savingsPlan: freshSavingsPlan,
+    };
+  }
+
   public async getAdvisorDataset(periodDays = 15): Promise<AdvisorDataset> {
     let status = mcpClient.getStatus();
 
@@ -51,6 +97,7 @@ export class FinanceController {
         accounts: liveSync.accounts,
         transactions: liveSync.transactions,
         budgets: liveSync.budgets,
+        categories: liveSync.categories,
       });
       return {
         summary,
