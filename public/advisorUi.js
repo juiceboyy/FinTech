@@ -148,9 +148,14 @@
           actionHtml = `<button type="button" class="btn-text-action btn-apply-goal" data-category="${c.category}" data-cat-id="${c.categoryId}" data-amount="${c.recommendedMonthlyBudget}" data-current="${c.zenmoneyBudget !== null ? c.zenmoneyBudget : ''}">Bijwerken</button>`;
         }
 
+        const refundSub =
+          c.refundMonthToDate && c.refundMonthToDate > 0
+            ? `<br><small class="text-muted">incl. -EUR ${Number(c.refundMonthToDate).toFixed(2)} refund</small>`
+            : '';
+
         return `
           <tr>
-            <td><strong>${c.category}</strong></td>
+            <td><strong>${c.category}</strong>${refundSub}</td>
             <td class="text-right">EUR ${Number(c.spentMonthToDate).toFixed(2)}</td>
             <td class="text-right">${zmBudgetText}</td>
             <td class="text-right"><strong>${recText}</strong></td>

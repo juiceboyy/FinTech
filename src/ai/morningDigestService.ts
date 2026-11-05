@@ -167,13 +167,17 @@ Strikte opmaakregels:
                 c.zenmoneyBudget !== null
                   ? `Huidig Zenmoney-budget: EUR ${new Decimal(c.zenmoneyBudget).toFixed(2)}`
                   : 'Nog geen Zenmoney-budget';
+              const refundNote =
+                c.refundMonthToDate && c.refundMonthToDate > 0
+                  ? ` (netto na aftrek van EUR ${new Decimal(c.refundMonthToDate).toFixed(2)} Tikkies/refunds)`
+                  : '';
               const isBudgetIncrease =
                 c.zenmoneyBudget !== null &&
                 new Decimal(c.recommendedMonthlyBudget).greaterThan(c.zenmoneyBudget);
               if (isBudgetIncrease) {
-                return `- **${c.category}**: Uitgegeven deze maand EUR ${new Decimal(c.spentMonthToDate).toFixed(2)} (${zmLabel}) - **Verhoog in Zenmoney naar EUR ${new Decimal(c.recommendedMonthlyBudget).toFixed(2)}/mnd** -> houdt **EUR ${new Decimal(c.dailyAllowanceRestOfMonth).toFixed(2)}/dag** vrij voor thuis koken (gedekt door horeca-stop) en bespaart alsnog **EUR ${new Decimal(c.potentialDailySavings).toFixed(2)}/dag** t.o.v. je 30-dagen gemiddelde.`;
+                return `- **${c.category}**: Uitgegeven deze maand EUR ${new Decimal(c.spentMonthToDate).toFixed(2)}${refundNote} (${zmLabel}) - **Verhoog in Zenmoney naar EUR ${new Decimal(c.recommendedMonthlyBudget).toFixed(2)}/mnd** -> houdt **EUR ${new Decimal(c.dailyAllowanceRestOfMonth).toFixed(2)}/dag** vrij voor thuis koken (gedekt door horeca-stop) en bespaart alsnog **EUR ${new Decimal(c.potentialDailySavings).toFixed(2)}/dag** t.o.v. je 30-dagen gemiddelde.`;
               }
-              return `- **${c.category}**: Uitgegeven deze maand EUR ${new Decimal(c.spentMonthToDate).toFixed(2)} (${zmLabel}) - **Stel in op EUR ${new Decimal(c.recommendedMonthlyBudget).toFixed(2)}/mnd in Zenmoney** -> levert **EUR ${new Decimal(c.potentialDailySavings).toFixed(2)}/dag** (EUR ${new Decimal(c.potentialMonthlySavings).toFixed(2)}/mnd) extra spaarruimte op.`;
+              return `- **${c.category}**: Uitgegeven deze maand EUR ${new Decimal(c.spentMonthToDate).toFixed(2)}${refundNote} (${zmLabel}) - **Stel in op EUR ${new Decimal(c.recommendedMonthlyBudget).toFixed(2)}/mnd in Zenmoney** -> levert **EUR ${new Decimal(c.potentialDailySavings).toFixed(2)}/dag** (EUR ${new Decimal(c.potentialMonthlySavings).toFixed(2)}/mnd) extra spaarruimte op.`;
             })
             .join('\n')
         : '- Alle categorieen lopen binnen de maanddoelen.';

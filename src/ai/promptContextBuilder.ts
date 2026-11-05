@@ -24,7 +24,11 @@ export class PromptContextBuilder {
               const dailySave = `Te besparen: EUR ${new Decimal(cp.potentialDailySavings).toFixed(2)}/dag (EUR ${new Decimal(cp.potentialWeeklySavings).toFixed(2)}/week, EUR ${new Decimal(cp.potentialMonthlySavings).toFixed(2)}/mnd)`;
               const allowance = `Resterend deze maand: EUR ${new Decimal(cp.remainingMonthAllowance).toFixed(2)} (Max EUR ${new Decimal(cp.dailyAllowanceRestOfMonth).toFixed(2)}/dag | Max EUR ${new Decimal(cp.weeklyAllowance).toFixed(2)}/week)`;
               const leakTag = cp.isLifestyleLeak ? ' [LEEFSTIJLLEK]' : '';
-              return `- ${cp.category}${leakTag}: Uitgegeven deze maand EUR ${new Decimal(cp.spentMonthToDate).toFixed(2)} (Afgelopen 30d: EUR ${new Decimal(cp.spentLast30Days).toFixed(2)}, gem. EUR ${new Decimal(cp.dailyAverageSpent).toFixed(2)}/dag) | ${zmText} | ${recText} | ${dailySave} | ${allowance} | Advies: ${cp.goalReason}`;
+              const refundText =
+                cp.refundMonthToDate && cp.refundMonthToDate > 0
+                  ? ` (netto na aftrek EUR ${new Decimal(cp.refundMonthToDate).toFixed(2)} binnengekomen Tikkies/refunds)`
+                  : '';
+              return `- ${cp.category}${leakTag}: Uitgegeven deze maand EUR ${new Decimal(cp.spentMonthToDate).toFixed(2)}${refundText} (Afgelopen 30d: EUR ${new Decimal(cp.spentLast30Days).toFixed(2)}, gem. EUR ${new Decimal(cp.dailyAverageSpent).toFixed(2)}/dag) | ${zmText} | ${recText} | ${dailySave} | ${allowance} | Advies: ${cp.goalReason}`;
             })
             .join('\n')
         : '- Geen categorie-uitgaven geregistreerd.';

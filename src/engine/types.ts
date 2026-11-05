@@ -8,6 +8,7 @@ import type {
 export interface CategoryExpense {
   category: string;
   amount: number;
+  refund?: number;
   percentage: number;
   budgeted?: number;
 }
@@ -81,7 +82,9 @@ export interface CategorySavingsPlan {
   category: string;
   categoryId?: string;
   spentMonthToDate: number;
+  refundMonthToDate?: number;
   spentLast30Days: number;
+  refundLast30Days?: number;
   dailyAverageSpent: number;
   zenmoneyBudget: number | null;
   recommendedMonthlyBudget: number;

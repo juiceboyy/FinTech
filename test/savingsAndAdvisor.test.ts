@@ -440,3 +440,126 @@ test('Express /api/advisor/apply-budgets validates request and applies budgets',
   }
 });
 
+test('SavingsPlanner and FinancialDataNormalizer net off refunds and incoming Tikkies from expense categories', () => {
+  const plan = SavingsPlanner.computeSavingsPlan({
+    referenceDate: '2026-11-05',
+    accounts: [
+      { id: 'acc-1', title: 'Betaalrekening', type: 'checking', balance: 2000, currency: 'EUR' },
+    ],
+    categories: [
+      { id: 'cat-eating-out', title: 'Eating out', parent: null, showIncome: false, showOutcome: true },
+      { id: 'cat-salary', title: 'Salary', parent: null, showIncome: true, showOutcome: false },
+    ],
+    transactions: [
+      {
+        id: 'tx-salary',
+        date: '2026-11-01',
+        income: 3000,
+        outcome: 0,
+        incomeAccount: 'acc-1',
+        categoryTitle: 'Salary',
+        currency: 'EUR',
+      },
+      // Paid dinner for group: 100 EUR
+      {
+        id: 'tx-dinner',
+        date: '2026-11-02',
+        income: 0,
+        outcome: 100,
+        outcomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        category: 'cat-eating-out',
+        payee: 'The Indian Lounge',
+        currency: 'EUR',
+      },
+      // Received Tikkie reimbursement: 50 EUR
+      {
+        id: 'tx-tikkie',
+        date: '2026-11-03',
+        income: 50,
+        outcome: 0,
+        incomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        category: 'cat-eating-out',
+        payee: 'Friend (Tikkie)',
+        currency: 'EUR',
+      },
+    ],
+    budgets: [
+      {
+        id: 'b-eating-out',
+        date: '2026-11-01',
+        category: 'cat-eating-out',
+        categoryTitle: 'Eating out',
+        budgetedOutcome: 150,
+      },
+    ],
+  });
+
+  // Net monthly expenses should be 100 - 50 = 50 EUR (not 100 EUR)
+  assert.strictEqual(plan.monthlyExpensesToDate, 50);
+  // Monthly income should be 3000 EUR (the 50 EUR Tikkie is a refund, not earned income)
+  assert.strictEqual(plan.monthlyIncomeToDate, 3000);
+
+  const eatingOutPlan = plan.categoryPlans.find((c) => c.category === 'Eating out');
+  assert.ok(eatingOutPlan, 'Eating out plan must exist');
+  assert.strictEqual(eatingOutPlan.spentMonthToDate, 50, 'Net spent month to date must be 50 EUR');
+  assert.strictEqual(eatingOutPlan.refundMonthToDate, 50, 'Refund month to date must record 50 EUR');
+  assert.strictEqual(eatingOutPlan.zenmoneyBudget, 150, 'Zenmoney budget is 150 EUR');
+  assert.strictEqual(eatingOutPlan.recommendedMonthlyBudget, 33, 'Strict 35% reduction from 50 EUR baseline = 33 EUR');
+
+  // Also test FinancialDataNormalizer
+  const summary = FinancialDataNormalizer.normalize({
+    accounts: [
+      { id: 'acc-1', title: 'Betaalrekening', type: 'checking', balance: 2000, currency: 'EUR' },
+    ],
+    categories: [
+      { id: 'cat-eating-out', title: 'Eating out', parent: null, showIncome: false, showOutcome: true },
+      { id: 'cat-salary', title: 'Salary', parent: null, showIncome: true, showOutcome: false },
+    ],
+    transactions: [
+      {
+        id: 'tx-salary',
+        date: '2026-11-01',
+        income: 3000,
+        outcome: 0,
+        incomeAccount: 'acc-1',
+        categoryTitle: 'Salary',
+        currency: 'EUR',
+      },
+      {
+        id: 'tx-dinner',
+        date: '2026-11-02',
+        income: 0,
+        outcome: 100,
+        outcomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        category: 'cat-eating-out',
+        currency: 'EUR',
+      },
+      {
+        id: 'tx-tikkie',
+        date: '2026-11-03',
+        income: 50,
+        outcome: 0,
+        incomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        category: 'cat-eating-out',
+        currency: 'EUR',
+      },
+    ],
+    budgets: [],
+    periodDays: 15,
+  });
+
+  assert.strictEqual(summary.totalIncome, 3000);
+  assert.strictEqual(summary.totalExpenses, 50);
+  assert.strictEqual(summary.netCashFlow, 2950);
+
+  const catExpense = summary.categoryBreakdown.find((c) => c.category === 'Eating out');
+  assert.ok(catExpense, 'Eating out breakdown item must exist');
+  assert.strictEqual(catExpense.amount, 50);
+  assert.strictEqual(catExpense.refund, 50);
+});
+
+

@@ -90,6 +90,7 @@ export class FinanceController {
         transactions: liveSync.transactions,
         plannedTransactions: liveSync.plannedTransactions,
         budgets: liveSync.budgets,
+        categories: liveSync.categories,
         periodDays,
         sourceMode: 'live',
       });
