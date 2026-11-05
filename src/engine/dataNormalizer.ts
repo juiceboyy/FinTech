@@ -4,6 +4,7 @@ import type {
   ZenmoneyTransaction,
   ZenmoneyPlannedTransaction,
   ZenmoneyBudget,
+  ZenmoneyCategory,
 } from '../mcp/types.js';
 import type {
   NormalizedFinancialSummary,
@@ -15,6 +16,30 @@ import type {
 } from './types.js';
 
 const SAVINGS_ACCOUNT_REGEX = /buffer|spaar|saving|reserve|vault/i;
+const INCOME_CATEGORY_REGEX =
+  /\b(salary|salaris|loon|income|inkomsten|interest|rente|gift|freelance|consulting|dividend|stipend|omzet|revenue|toeslag|uitkering)\b/i;
+
+function isExpenseCategory(
+  categoryTitle?: string,
+  categoryKey?: string,
+  categoryMap?: Map<string, ZenmoneyCategory>
+): boolean {
+  if (categoryMap) {
+    for (const key of [categoryTitle, categoryKey]) {
+      if (!key) continue;
+      const cat = categoryMap.get(key.toLowerCase());
+      if (cat) {
+        if (cat.showOutcome && !cat.showIncome) return true;
+        if (cat.showIncome && !cat.showOutcome) return false;
+      }
+    }
+  }
+  for (const key of [categoryTitle, categoryKey]) {
+    if (!key) continue;
+    if (INCOME_CATEGORY_REGEX.test(key)) return false;
+  }
+  return true;
+}
 
 export class FinancialDataNormalizer {
   public static normalize(params: {
@@ -22,6 +47,7 @@ export class FinancialDataNormalizer {
     transactions: ZenmoneyTransaction[];
     plannedTransactions?: ZenmoneyPlannedTransaction[];
     budgets: ZenmoneyBudget[];
+    categories?: ZenmoneyCategory[];
     periodDays?: number;
     forecastHorizonDays?: number;
     sourceMode?: 'live';
@@ -41,16 +67,26 @@ export class FinancialDataNormalizer {
       accountById.set(acc.id, acc);
     }
 
+    const categoryByTitleOrId = new Map<string, ZenmoneyCategory>();
+    if (params.categories) {
+      for (const c of params.categories) {
+        if (c.title) categoryByTitleOrId.set(c.title.toLowerCase(), c);
+        if (c.id) categoryByTitleOrId.set(c.id.toLowerCase(), c);
+      }
+    }
+
     // Filter transactions within period
     const filtered = params.transactions
       .filter((tx) => tx.date >= startDate && tx.date <= endDate)
       .map((tx) => ({ ...tx }));
 
     let totalIncomeDec = new Decimal(0);
-    let totalExpensesDec = new Decimal(0);
+    let totalExpensesOutflowDec = new Decimal(0);
+    let totalExpenseRefundsDec = new Decimal(0);
     let totalInternalTransfersDec = new Decimal(0);
     let savingsTransfersDec = new Decimal(0);
-    const categoryTotals: Record<string, Decimal> = {};
+    const categoryOutflows: Record<string, Decimal> = {};
+    const categoryRefunds: Record<string, Decimal> = {};
     const internalTransfers: InternalTransferItem[] = [];
     const topAnomalies: FinancialAnomaly[] = [];
 
@@ -96,12 +132,20 @@ export class FinancialDataNormalizer {
         continue;
       }
 
-      totalIncomeDec = totalIncomeDec.plus(inc);
-      totalExpensesDec = totalExpensesDec.plus(out);
+      const cat = tx.categoryTitle || tx.category || 'Uncategorized';
+      const isExpenseCat = isExpenseCategory(tx.categoryTitle, tx.category, categoryByTitleOrId);
+
+      if (isExpenseCat && inc.greaterThan(0)) {
+        // Refund or Tikkie payback on expense category
+        totalExpenseRefundsDec = totalExpenseRefundsDec.plus(inc);
+        categoryRefunds[cat] = (categoryRefunds[cat] || new Decimal(0)).plus(inc);
+      } else {
+        totalIncomeDec = totalIncomeDec.plus(inc);
+      }
 
       if (out.greaterThan(0)) {
-        const cat = tx.categoryTitle || tx.category || 'Uncategorized';
-        categoryTotals[cat] = (categoryTotals[cat] || new Decimal(0)).plus(out);
+        totalExpensesOutflowDec = totalExpensesOutflowDec.plus(out);
+        categoryOutflows[cat] = (categoryOutflows[cat] || new Decimal(0)).plus(out);
       }
 
       if (out.greaterThanOrEqualTo(250)) {
@@ -128,16 +172,25 @@ export class FinancialDataNormalizer {
       }
     }
 
+    const totalExpensesDec = Decimal.max(0, totalExpensesOutflowDec.minus(totalExpenseRefundsDec));
     const netCashFlowDec = totalIncomeDec.minus(totalExpensesDec);
     const savingsRateDec = totalIncomeDec.greaterThan(0)
       ? netCashFlowDec.dividedBy(totalIncomeDec).times(100)
       : new Decimal(0);
 
     // Category breakdown
+    const allCategoryNames = new Set<string>([
+      ...Object.keys(categoryOutflows),
+      ...Object.keys(categoryRefunds),
+    ]);
+
     const currentMonthStart = `${endDate.slice(0, 7)}-01`;
     const hasCurrentMonthBudgets = params.budgets.some((b) => b.date === currentMonthStart);
-    const categoryBreakdown: CategoryExpense[] = Object.entries(categoryTotals)
-      .map(([category, amountDec]) => {
+    const categoryBreakdown: CategoryExpense[] = Array.from(allCategoryNames)
+      .map((category) => {
+        const outDec = categoryOutflows[category] || new Decimal(0);
+        const refDec = categoryRefunds[category] || new Decimal(0);
+        const amountDec = Decimal.max(0, outDec.minus(refDec));
         const percentage = totalExpensesDec.greaterThan(0)
           ? amountDec.dividedBy(totalExpensesDec).times(100).toDecimalPlaces(1).toNumber()
           : 0;
@@ -149,10 +202,12 @@ export class FinancialDataNormalizer {
         return {
           category,
           amount: amountDec.toDecimalPlaces(2).toNumber(),
+          refund: refDec.greaterThan(0) ? refDec.toDecimalPlaces(2).toNumber() : undefined,
           percentage,
           budgeted: matchingBudget?.budgetedOutcome,
         };
       })
+      .filter((c) => c.amount > 0 || (c.refund && c.refund > 0) || c.budgeted !== undefined)
       .sort((a, b) => new Decimal(b.amount).minus(a.amount).toNumber());
 
     // Liquid balance (checking + savings + cash)

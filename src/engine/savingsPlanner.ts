@@ -3,6 +3,7 @@ import type {
   ZenmoneyAccount,
   ZenmoneyTransaction,
   ZenmoneyBudget,
+  ZenmoneyCategory,
 } from '../mcp/types.js';
 import type {
   CategorySavingsPlan,
@@ -21,12 +22,37 @@ const ESSENTIAL_VARIABLE_REGEX =
 const MIN_DAILY_ESSENTIAL_FOOD_FLOOR = new Decimal('8.50');
 
 const SAVINGS_ACCOUNT_REGEX = /buffer|spaar|saving|reserve|vault/i;
+const INCOME_CATEGORY_REGEX =
+  /\b(salary|salaris|loon|income|inkomsten|interest|rente|gift|freelance|consulting|dividend|stipend|omzet|revenue|toeslag|uitkering)\b/i;
+
+function isExpenseCategory(
+  categoryTitle?: string,
+  categoryKey?: string,
+  categoryMap?: Map<string, ZenmoneyCategory>
+): boolean {
+  if (categoryMap) {
+    for (const key of [categoryTitle, categoryKey]) {
+      if (!key) continue;
+      const cat = categoryMap.get(key.toLowerCase());
+      if (cat) {
+        if (cat.showOutcome && !cat.showIncome) return true;
+        if (cat.showIncome && !cat.showOutcome) return false;
+      }
+    }
+  }
+  for (const key of [categoryTitle, categoryKey]) {
+    if (!key) continue;
+    if (INCOME_CATEGORY_REGEX.test(key)) return false;
+  }
+  return true;
+}
 
 export class SavingsPlanner {
   public static computeSavingsPlan(params: {
     accounts: ZenmoneyAccount[];
     transactions: ZenmoneyTransaction[];
     budgets: ZenmoneyBudget[];
+    categories?: ZenmoneyCategory[];
     referenceDate?: string;
   }): SavingsGoalsSummary {
     const refDateStr = params.referenceDate || new Date().toISOString().split('T')[0];
@@ -57,13 +83,43 @@ export class SavingsPlanner {
       accountById.set(acc.id, acc);
     }
 
+    const categoryIdByTitle = new Map<string, string>();
+    if (params.categories) {
+      for (const c of params.categories) {
+        if (c.title && c.id) {
+          categoryIdByTitle.set(c.title.toLowerCase(), c.id);
+        }
+      }
+    }
+    for (const b of params.budgets) {
+      if (b.categoryTitle && b.category) {
+        categoryIdByTitle.set(b.categoryTitle.toLowerCase(), b.category);
+      }
+    }
+    for (const tx of params.transactions) {
+      if (tx.categoryTitle && tx.category) {
+        categoryIdByTitle.set(tx.categoryTitle.toLowerCase(), tx.category);
+      }
+    }
+
+    const categoryByTitleOrId = new Map<string, ZenmoneyCategory>();
+    if (params.categories) {
+      for (const c of params.categories) {
+        if (c.title) categoryByTitleOrId.set(c.title.toLowerCase(), c);
+        if (c.id) categoryByTitleOrId.set(c.id.toLowerCase(), c);
+      }
+    }
+
     let monthlyIncomeDec = new Decimal(0);
-    let monthlyExpensesDec = new Decimal(0);
+    let monthlyOutflowDec = new Decimal(0);
+    let monthlyRefundsDec = new Decimal(0);
     let monthlySavingsTransfersDec = new Decimal(0);
     let last30IncomeDec = new Decimal(0);
 
-    const monthCategorySpent: Record<string, Decimal> = {};
-    const last30CategorySpent: Record<string, Decimal> = {};
+    const monthCategoryOutflow: Record<string, Decimal> = {};
+    const monthCategoryRefunds: Record<string, Decimal> = {};
+    const last30CategoryOutflow: Record<string, Decimal> = {};
+    const last30CategoryRefunds: Record<string, Decimal> = {};
 
     for (const tx of params.transactions) {
       if (tx.date > refDateStr || tx.date < last30Start) {
@@ -91,19 +147,51 @@ export class SavingsPlanner {
         continue;
       }
 
-      last30IncomeDec = last30IncomeDec.plus(inc);
-      if (inCurrentMonth) {
-        monthlyIncomeDec = monthlyIncomeDec.plus(inc);
-        monthlyExpensesDec = monthlyExpensesDec.plus(out);
+      const catName = tx.categoryTitle || tx.category || 'Uncategorized';
+      const isExpenseCat = isExpenseCategory(tx.categoryTitle, tx.category, categoryByTitleOrId);
+
+      // Refund or Tikkie payback on expense category
+      if (isExpenseCat && inc.greaterThan(0)) {
+        last30CategoryRefunds[catName] = (last30CategoryRefunds[catName] || new Decimal(0)).plus(inc);
+        if (inCurrentMonth) {
+          monthCategoryRefunds[catName] = (monthCategoryRefunds[catName] || new Decimal(0)).plus(inc);
+          monthlyRefundsDec = monthlyRefundsDec.plus(inc);
+        }
+      } else {
+        last30IncomeDec = last30IncomeDec.plus(inc);
+        if (inCurrentMonth) {
+          monthlyIncomeDec = monthlyIncomeDec.plus(inc);
+        }
       }
 
       if (out.greaterThan(0)) {
-        const cat = tx.categoryTitle || tx.category || 'Uncategorized';
-        last30CategorySpent[cat] = (last30CategorySpent[cat] || new Decimal(0)).plus(out);
+        last30CategoryOutflow[catName] = (last30CategoryOutflow[catName] || new Decimal(0)).plus(out);
         if (inCurrentMonth) {
-          monthCategorySpent[cat] = (monthCategorySpent[cat] || new Decimal(0)).plus(out);
+          monthCategoryOutflow[catName] = (monthCategoryOutflow[catName] || new Decimal(0)).plus(out);
+          monthlyOutflowDec = monthlyOutflowDec.plus(out);
         }
       }
+    }
+
+    const monthlyExpensesDec = Decimal.max(0, monthlyOutflowDec.minus(monthlyRefundsDec));
+
+    const monthCategorySpent: Record<string, Decimal> = {};
+    const last30CategorySpent: Record<string, Decimal> = {};
+    const allCategoryKeys = new Set<string>([
+      ...Object.keys(monthCategoryOutflow),
+      ...Object.keys(monthCategoryRefunds),
+      ...Object.keys(last30CategoryOutflow),
+      ...Object.keys(last30CategoryRefunds),
+    ]);
+
+    for (const cat of allCategoryKeys) {
+      const mOut = monthCategoryOutflow[cat] || new Decimal(0);
+      const mRef = monthCategoryRefunds[cat] || new Decimal(0);
+      monthCategorySpent[cat] = Decimal.max(0, mOut.minus(mRef));
+
+      const lOut = last30CategoryOutflow[cat] || new Decimal(0);
+      const lRef = last30CategoryRefunds[cat] || new Decimal(0);
+      last30CategorySpent[cat] = Decimal.max(0, lOut.minus(lRef));
     }
 
     // Map Zenmoney budgets by category title for currentMonthStart
@@ -249,10 +337,15 @@ export class SavingsPlanner {
         restOfMonthVariableLimitDec = restOfMonthVariableLimitDec.plus(remainingMonthDec);
       }
 
+      const catId = categoryIdByTitle.get(category.toLowerCase());
+
       categoryPlans.push({
         category,
+        categoryId: catId,
         spentMonthToDate: mtdDec.toDecimalPlaces(2).toNumber(),
+        refundMonthToDate: (monthCategoryRefunds[category] || new Decimal(0)).toDecimalPlaces(2).toNumber(),
         spentLast30Days: l30Dec.toDecimalPlaces(2).toNumber(),
+        refundLast30Days: (last30CategoryRefunds[category] || new Decimal(0)).toDecimalPlaces(2).toNumber(),
         dailyAverageSpent: dailyAvgDec.toDecimalPlaces(2).toNumber(),
         zenmoneyBudget: zmBudgetDec ? zmBudgetDec.toDecimalPlaces(2).toNumber() : null,
         recommendedMonthlyBudget: recommendedDec.toDecimalPlaces(2).toNumber(),

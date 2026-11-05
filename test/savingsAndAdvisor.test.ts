@@ -8,6 +8,9 @@ import { financialChatService } from '../src/ai/financialChatService.js';
 import { morningDigestService } from '../src/ai/morningDigestService.js';
 import { generateMockFinancialData } from '../src/engine/mockData.js';
 import { normalizeZenmoneyBudgets } from '../src/mcp/v8BudgetNormalizer.js';
+import { v8Mutations } from '../src/mcp/v8Mutations.js';
+import { createApp } from '../src/server/app.js';
+import { financeController } from '../src/engine/financeController.js';
 
 test('SavingsPlanner computes daily, weekly, and rest-of-month goals and recommends Zenmoney budgets', () => {
   const today = '2026-10-18';
@@ -258,4 +261,305 @@ test('normalizeZenmoneyBudgets reconstructs full EUR 1500 Auto budget by adding 
   const travelPlan = plan.categoryPlans.find((c) => c.category === 'Travel');
   assert.strictEqual(travelPlan, undefined, 'Stale 2025 Travel budget must not leak into October 2026 when October Travel budget is 0');
 });
+
+test('SavingsPlanner resolves and attaches categoryId from categories, budgets, and transactions', () => {
+  const plan = SavingsPlanner.computeSavingsPlan({
+    referenceDate: '2026-10-18',
+    accounts: [{ id: 'acc-1', title: 'Betaal', type: 'checking', balance: 1000, currency: 'EUR' }],
+    categories: [
+      { id: 'cat-dining-uuid', title: 'Dining & Cafes' },
+      { id: 'cat-groceries-uuid', title: 'Groceries' },
+    ],
+    transactions: [
+      {
+        id: 't1',
+        date: '2026-10-05',
+        income: 0,
+        outcome: 120,
+        outcomeAccount: 'acc-1',
+        category: 'cat-dining-uuid',
+        categoryTitle: 'Dining & Cafes',
+        payee: 'Cafe',
+        currency: 'EUR',
+      },
+    ],
+    budgets: [
+      {
+        id: 'b1',
+        date: '2026-10-01',
+        category: 'cat-groceries-uuid',
+        categoryTitle: 'Groceries',
+        budgetedOutcome: 500,
+      },
+    ],
+  });
+
+  const dining = plan.categoryPlans.find((c) => c.category === 'Dining & Cafes');
+  assert.ok(dining);
+  assert.strictEqual(dining.categoryId, 'cat-dining-uuid');
+
+  const groceries = plan.categoryPlans.find((c) => c.category === 'Groceries');
+  assert.ok(groceries);
+  assert.strictEqual(groceries.categoryId, 'cat-groceries-uuid');
+});
+
+test('ZenmoneyV8MutationService.writeBudgetsBatch formats diff payload with Decimal precision, subtracts planned reminderMarkers, and locks outcome', async () => {
+  const originalFetch = global.fetch;
+  let capturedBody: any = null;
+
+  global.fetch = (async (_url: any, options: any) => {
+    capturedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        serverTimestamp: 1729000000,
+      }),
+    };
+  }) as any;
+
+  try {
+    const syncContext: any = {
+      userId: 42,
+      serverTimestamp: 1728900000,
+      accounts: [],
+      transactions: [],
+      budgets: [],
+      plannedTransactions: [
+        {
+          id: 'rm-1',
+          date: '2026-10-25',
+          income: 0,
+          outcome: 150,
+          category: 'cat-groceries-uuid',
+          state: 'planned',
+          isTransfer: false,
+          payee: 'Pre-order AH',
+          currency: 'EUR',
+        },
+      ],
+    };
+
+    const results = await v8Mutations.writeBudgetsBatch('fake-token', syncContext, [
+      {
+        categoryId: 'cat-groceries-uuid',
+        amount: 450,
+        monthDate: '2026-10-01',
+      },
+      {
+        categoryId: 'cat-dining-uuid',
+        amount: '120.50',
+        monthDate: '2026-10-01',
+      },
+    ]);
+
+    assert.strictEqual(results.length, 2);
+    assert.strictEqual(syncContext.serverTimestamp, 1729000000);
+
+    assert.ok(capturedBody);
+    assert.strictEqual(capturedBody.serverTimestamp, 1728900000);
+    assert.ok(Array.isArray(capturedBody.budget));
+    assert.strictEqual(capturedBody.budget.length, 2);
+
+    const b1 = capturedBody.budget.find((b: any) => b.tag === 'cat-groceries-uuid');
+    assert.ok(b1);
+    assert.strictEqual(b1.user, 42);
+    assert.strictEqual(b1.date, '2026-10-01');
+    // Desired 450 minus scheduled marker 150 = 300 remainder
+    assert.strictEqual(b1.outcome, 300);
+    assert.strictEqual(b1.outcomeLock, true);
+    assert.strictEqual(b1.incomeLock, false);
+
+    const b2 = capturedBody.budget.find((b: any) => b.tag === 'cat-dining-uuid');
+    assert.ok(b2);
+    assert.strictEqual(b2.outcome, 120.5);
+    assert.strictEqual(b2.outcomeLock, true);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Express /api/advisor/apply-budgets validates request and applies budgets', async () => {
+  const app = createApp();
+  const server = app.listen(0);
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+
+  const originalApply = financeController.applyBudgetGoals;
+  let receivedItems: any = null;
+  (financeController as any).applyBudgetGoals = async (items: any) => {
+    receivedItems = items;
+    return {
+      appliedCount: items.length,
+      updatedBudgets: items.map((i: any) => ({
+        categoryId: i.categoryId,
+        outcome: i.amount,
+        date: i.monthDate || '2026-10-01',
+      })),
+      savingsPlan: {
+        referenceDate: '2026-10-18',
+        currentMonthStart: '2026-10-01',
+        categoryPlans: [],
+      },
+    };
+  };
+
+  try {
+    // 1. Invalid payload: missing categoryId
+    const resInvalid = await fetch(`http://127.0.0.1:${port}/api/advisor/apply-budgets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        budgets: [{ amount: 100 }],
+      }),
+    });
+    assert.strictEqual(resInvalid.status, 400);
+
+    // 2. Valid payload
+    const resValid = await fetch(`http://127.0.0.1:${port}/api/advisor/apply-budgets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        monthDate: '2026-10-01',
+        budgets: [
+          { categoryId: 'cat-dining', amount: 150 },
+          { categoryId: 'cat-groceries', amount: '450.00' },
+        ],
+      }),
+    });
+    assert.strictEqual(resValid.status, 200);
+    const data: any = await resValid.json();
+    assert.strictEqual(data.success, true);
+    assert.strictEqual(data.appliedCount, 2);
+    assert.strictEqual(receivedItems.length, 2);
+    assert.strictEqual(receivedItems[0].categoryId, 'cat-dining');
+    assert.strictEqual(receivedItems[0].monthDate, '2026-10-01');
+  } finally {
+    (financeController as any).applyBudgetGoals = originalApply;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('SavingsPlanner and FinancialDataNormalizer net off refunds and incoming Tikkies from expense categories', () => {
+  const plan = SavingsPlanner.computeSavingsPlan({
+    referenceDate: '2026-11-05',
+    accounts: [
+      { id: 'acc-1', title: 'Betaalrekening', type: 'checking', balance: 2000, currency: 'EUR' },
+    ],
+    categories: [
+      { id: 'cat-eating-out', title: 'Eating out', parent: null, showIncome: false, showOutcome: true },
+      { id: 'cat-salary', title: 'Salary', parent: null, showIncome: true, showOutcome: false },
+    ],
+    transactions: [
+      {
+        id: 'tx-salary',
+        date: '2026-11-01',
+        income: 3000,
+        outcome: 0,
+        incomeAccount: 'acc-1',
+        categoryTitle: 'Salary',
+        currency: 'EUR',
+      },
+      // Paid dinner for group: 100 EUR
+      {
+        id: 'tx-dinner',
+        date: '2026-11-02',
+        income: 0,
+        outcome: 100,
+        outcomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        category: 'cat-eating-out',
+        payee: 'The Indian Lounge',
+        currency: 'EUR',
+      },
+      // Received Tikkie reimbursement: 50 EUR
+      {
+        id: 'tx-tikkie',
+        date: '2026-11-03',
+        income: 50,
+        outcome: 0,
+        incomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        category: 'cat-eating-out',
+        payee: 'Friend (Tikkie)',
+        currency: 'EUR',
+      },
+    ],
+    budgets: [
+      {
+        id: 'b-eating-out',
+        date: '2026-11-01',
+        category: 'cat-eating-out',
+        categoryTitle: 'Eating out',
+        budgetedOutcome: 150,
+      },
+    ],
+  });
+
+  // Net monthly expenses should be 100 - 50 = 50 EUR (not 100 EUR)
+  assert.strictEqual(plan.monthlyExpensesToDate, 50);
+  // Monthly income should be 3000 EUR (the 50 EUR Tikkie is a refund, not earned income)
+  assert.strictEqual(plan.monthlyIncomeToDate, 3000);
+
+  const eatingOutPlan = plan.categoryPlans.find((c) => c.category === 'Eating out');
+  assert.ok(eatingOutPlan, 'Eating out plan must exist');
+  assert.strictEqual(eatingOutPlan.spentMonthToDate, 50, 'Net spent month to date must be 50 EUR');
+  assert.strictEqual(eatingOutPlan.refundMonthToDate, 50, 'Refund month to date must record 50 EUR');
+  assert.strictEqual(eatingOutPlan.zenmoneyBudget, 150, 'Zenmoney budget is 150 EUR');
+  assert.strictEqual(eatingOutPlan.recommendedMonthlyBudget, 33, 'Strict 35% reduction from 50 EUR baseline = 33 EUR');
+
+  // Also test FinancialDataNormalizer
+  const summary = FinancialDataNormalizer.normalize({
+    accounts: [
+      { id: 'acc-1', title: 'Betaalrekening', type: 'checking', balance: 2000, currency: 'EUR' },
+    ],
+    categories: [
+      { id: 'cat-eating-out', title: 'Eating out', parent: null, showIncome: false, showOutcome: true },
+      { id: 'cat-salary', title: 'Salary', parent: null, showIncome: true, showOutcome: false },
+    ],
+    transactions: [
+      {
+        id: 'tx-salary',
+        date: '2026-11-01',
+        income: 3000,
+        outcome: 0,
+        incomeAccount: 'acc-1',
+        categoryTitle: 'Salary',
+        currency: 'EUR',
+      },
+      {
+        id: 'tx-dinner',
+        date: '2026-11-02',
+        income: 0,
+        outcome: 100,
+        outcomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        category: 'cat-eating-out',
+        currency: 'EUR',
+      },
+      {
+        id: 'tx-tikkie',
+        date: '2026-11-03',
+        income: 50,
+        outcome: 0,
+        incomeAccount: 'acc-1',
+        categoryTitle: 'Eating out',
+        category: 'cat-eating-out',
+        currency: 'EUR',
+      },
+    ],
+    budgets: [],
+    periodDays: 15,
+  });
+
+  assert.strictEqual(summary.totalIncome, 3000);
+  assert.strictEqual(summary.totalExpenses, 50);
+  assert.strictEqual(summary.netCashFlow, 2950);
+
+  const catExpense = summary.categoryBreakdown.find((c) => c.category === 'Eating out');
+  assert.ok(catExpense, 'Eating out breakdown item must exist');
+  assert.strictEqual(catExpense.amount, 50);
+  assert.strictEqual(catExpense.refund, 50);
+});
+
 

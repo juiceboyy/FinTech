@@ -62,7 +62,7 @@ async function fetchFinancialSummary() {
           .map(
             (c) => `
         <div class="category-item">
-          <span class="category-name">${c.category}</span>
+          <span class="category-name">${c.category}${c.refund ? ` <small class="text-muted">(netto -EUR ${c.refund.toFixed(2)} refund)</small>` : ''}</span>
           <span class="category-stats">EUR ${c.amount.toFixed(2)} (${c.percentage.toFixed(1)}%)</span>
         </div>`
           )
